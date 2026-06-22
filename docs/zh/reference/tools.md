@@ -99,19 +99,22 @@ Plan 模式是一种受约束的工作状态：进入后 `Write` 与 `Edit` 只�
 
 ## 后台任务
 
-后台任务工具用于管理通过 `Bash`、`Agent` 或 `AskUserQuestion` 启动的后台任务。任务进入终止状态时会自动把状态和已保存的输出路径送回 Agent；如需提前检查进度，使用 `TaskOutput`。
+后台任务工具用于管理通过 `Bash`、`Agent`、`AskUserQuestion` 或 `Monitor` 启动的后台任务。任务进入终止状态时会自动把状态和已保存的输出路径送回 Agent；如需提前检查进度，使用 `TaskOutput`。
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
 | `TaskList` | 自动放行 | 列出后台任务 |
 | `TaskOutput` | 自动放行 | 查看后台任务的输出 |
 | `TaskStop` | 需审批 | 停止正在运行的后台任务 |
+| `Monitor` | 需审批 | 运行自过滤 shell 命令，将每条 stdout 作为通知推送 |
 
 **`TaskList`** 返回后台任务列表。可选参数 `active_only`（默认 true，仅列出运行中的任务）和 `limit`（默认 20，取值范围 1–100）。
 
 **`TaskOutput`** 根据 `task_id` 返回任务状态与输出。内联预览最多包含最近 32 KB 的内容；完整日志保存在磁盘上，工具会一并返回 `output_path` 并提示通过 `Read` 分页读取。该调用始终是非阻塞的——立即返回当前快照，任务完成会通过自动通知送达。
 
 **`TaskStop`** 接受 `task_id` 和可选的 `reason`（默认 `Stopped by TaskStop`）。对已处于终止状态的任务也能安全调用。
+
+**`Monitor`** 在后台运行一条自过滤的 shell 命令，将每条匹配的 stdout 行作为实时的 `<notification type="monitor_line">` 推送。参数：`command`（必填；建议使用行缓冲过滤器，如 `grep --line-buffered` 或带 `fflush()` 的 `awk`）、`description`（每条通知中显示）、`timeout_ms`（默认 5 分钟；`persistent=true` 时忽略）、`persistent`（持续到会话结束或调用 `TaskStop`）。输出会在一个短窗口内批量推送，若 5 秒内超过 200 行会自动停止；出现这种情况时请收紧过滤条件后重新启动。
 
 ## 定时任务
 
