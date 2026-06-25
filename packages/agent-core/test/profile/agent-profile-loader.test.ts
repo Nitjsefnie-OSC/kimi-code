@@ -200,6 +200,7 @@ describe('default agent profiles', () => {
       'TodoList',
       'WebSearch',
       'FetchURL',
+      'Whoami',
       'Write',
       'mcp__*',
     ]);

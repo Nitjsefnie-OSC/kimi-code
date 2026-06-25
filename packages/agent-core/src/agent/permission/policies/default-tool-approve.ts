@@ -5,6 +5,7 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'Grep',
   'Glob',
   'ReadMediaFile',
+  'Whoami',
   'SetTodoList',
   'TodoList',
   'TaskList',

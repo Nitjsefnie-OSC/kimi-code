@@ -476,6 +476,7 @@ describe('SessionSubagentHost', () => {
       'TaskOutput',
       'TaskStop',
       'TodoList',
+      'Whoami',
       'Write',
     ]);
     expect(child.llmCalls[0]?.history).toMatchObject([

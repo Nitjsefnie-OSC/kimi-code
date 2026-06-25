@@ -33,6 +33,7 @@ tools:
   - GetGoal
   - SetGoalBudget
   - UpdateGoal
+  - Whoami
   - mcp__*
 
 subagents:
