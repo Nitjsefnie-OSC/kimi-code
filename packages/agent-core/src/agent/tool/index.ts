@@ -834,6 +834,7 @@ export class ToolManager {
         new b.TaskOutputTool(background),
         new b.TaskStopTool(background),
         allowBackground && new b.MonitorTool(kaos, cwd, background),
+        new b.WhoamiTool(this.agent),
         this.agent.cron && new b.CronCreateTool(this.agent.cron),
         this.agent.cron && new b.CronListTool(this.agent.cron),
         this.agent.cron && new b.CronDeleteTool(this.agent.cron),
