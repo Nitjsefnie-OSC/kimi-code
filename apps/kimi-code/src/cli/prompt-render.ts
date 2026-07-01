@@ -146,6 +146,65 @@ export class PromptTranscriptWriter implements PromptTurnWriter {
   }
 }
 
+/**
+ * Quiet mode (`kimi -p --quiet`): suppress the streamed transcript on stdout
+ * and print only the last assistant message, unformatted, once the turn ends.
+ * Thinking still streams to stderr so a watching operator sees progress while
+ * stdout stays clean for scripting.
+ */
+export class PromptQuietWriter implements PromptTurnWriter {
+  private readonly thinkingWriter: PromptBlockWriter;
+  private assistantText = '';
+  private lastMessage = '';
+
+  constructor(
+    private readonly stdout: PromptOutput,
+    stderr: PromptOutput,
+  ) {
+    this.thinkingWriter = new PromptBlockWriter(stderr);
+  }
+
+  writeAssistantDelta(delta: string): void {
+    this.thinkingWriter.finish();
+    this.assistantText += delta;
+  }
+
+  writeHookResult(): void {}
+
+  writeThinkingDelta(delta: string): void {
+    this.thinkingWriter.write(delta);
+  }
+
+  writeToolCall(): void {}
+
+  writeToolCallDelta(): void {}
+
+  writeToolResult(): void {}
+
+  // Quiet `-p` keeps retries silent: the failed attempt's partial assistant
+  // text is discarded via discardAssistant, so only the final message prints.
+  writeRetrying(): void {}
+
+  flushAssistant(): void {
+    if (this.assistantText.length === 0) return;
+    this.lastMessage = this.assistantText;
+    this.assistantText = '';
+  }
+
+  discardAssistant(): void {
+    this.assistantText = '';
+  }
+
+  finish(): void {
+    this.thinkingWriter.finish();
+    this.flushAssistant();
+    if (this.lastMessage.length === 0) return;
+    this.stdout.write(
+      this.lastMessage.endsWith('\n') ? this.lastMessage : `${this.lastMessage}\n`,
+    );
+  }
+}
+
 export class PromptJsonWriter implements PromptTurnWriter {
   private assistantText = '';
   private readonly toolCalls: PromptJsonToolCall[] = [];

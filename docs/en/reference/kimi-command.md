@@ -20,6 +20,7 @@ All flags are optional — run `kimi` directly to enter an interactive session:
 | `--model <model>` | `-m` | Specify a model alias for this launch. When omitted, new sessions use `default_model` from the config file |
 | `--prompt <prompt>` | `-p` | Run a single prompt non-interactively and stream the Assistant output to stdout. This mode does not open the TUI |
 | `--output-format <format>` | | Set the non-interactive output format; supports `text` and `stream-json`. Can only be used with `--prompt`; defaults to `text` |
+| `--quiet` | `-q` | With `--prompt`: print only the final assistant message to stdout instead of the streamed transcript |
 | `--yolo` | `-y` | Auto-approve regular tool calls, skipping approval requests |
 | `--auto` | | Start with auto permission mode; tool approvals are handled automatically and the Agent will not ask the user questions |
 | `--plan` | | Start a new session in Plan mode — the AI will prioritize read-only tools for exploration and planning |
@@ -42,6 +43,7 @@ The following combinations are rejected at startup:
 - `--yolo` and `--auto` are mutually exclusive — the two permission modes cannot be combined
 - `--prompt` cannot be used with `--yolo`, `--auto`, or `--plan` — non-interactive mode uses `auto` permission by default
 - `--output-format` can only be used together with `--prompt`
+- `--quiet` can only be used together with `--prompt`, and cannot be combined with `--output-format stream-json`
 
 When resuming a session, you can override its saved permission or plan mode by adding `--auto`, `--yolo`, or `--plan`. For example, `kimi --continue --auto` resumes the latest session and switches it to auto permission mode.
 

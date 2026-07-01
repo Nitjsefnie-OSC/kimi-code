@@ -20,6 +20,7 @@ kimi <subcommand> [options]
 | `--model <model>` | `-m` | 为本次启动指定模型别名。省略时新会话使用配置文件中的 `default_model` |
 | `--prompt <prompt>` | `-p` | 非交互执行单次 prompt，并把 Assistant 输出流式写到 stdout。该模式不会打开 TUI |
 | `--output-format <format>` | | 设置非交互输出格式，支持 `text` 与 `stream-json`。仅可与 `--prompt` 一起使用，默认 `text` |
+| `--quiet` | `-q` | 与 `--prompt` 搭配使用：只把最后一条助手消息输出到 stdout，而不是流式输出完整转录 |
 | `--yolo` | `-y` | 自动批准普通工具调用，跳过审批请求 |
 | `--auto` | | 以 auto 权限模式启动；工具审批自动处理，Agent 不会向用户提问 |
 | `--plan` | | 以 Plan 模式启动新会话，AI 会优先使用只读工具进行探索和规划 |
@@ -42,6 +43,7 @@ kimi <subcommand> [options]
 - `--yolo` 和 `--auto` 互斥——两种权限模式互斥
 - `--prompt` 不能与 `--yolo`、`--auto` 或 `--plan` 同时使用——非交互模式固定使用 `auto` 权限
 - `--output-format` 只能与 `--prompt` 一起使用
+- `--quiet` 只能与 `--prompt` 一起使用，且不能与 `--output-format stream-json` 组合
 
 恢复会话时，可以通过 `--auto`、`--yolo` 或 `--plan` 覆盖原会话保存的权限或计划模式。例如，`kimi --continue --auto` 会恢复最近会话并切换到 auto 权限模式。
 

@@ -906,6 +906,82 @@ describe('runPrompt', () => {
     expect(stdout.text()).toContain('{"role":"assistant","content":"second"}');
   });
 
+  it('quiet mode prints only the last assistant message without transcript formatting', async () => {
+    mocks.session.prompt.mockImplementationOnce(async () => {
+      for (const handler of mocks.eventHandlers) {
+        handler(
+          mocks.mainEvent({ type: 'turn.started', turnId: 3, origin: { kind: 'user' } }),
+        );
+        handler(mocks.mainEvent({ type: 'turn.step.started', turnId: 3 }));
+        handler(mocks.mainEvent({ type: 'thinking.delta', turnId: 3, delta: 'pondering' }));
+        handler(mocks.mainEvent({ type: 'assistant.delta', turnId: 3, delta: 'first message' }));
+        handler(mocks.mainEvent({ type: 'turn.step.started', turnId: 3 }));
+        handler(
+          mocks.mainEvent({
+            type: 'tool.call.started',
+            turnId: 3,
+            toolCallId: 'tc_q',
+            name: 'Shell',
+            args: { command: 'ls' },
+          }),
+        );
+        handler(
+          mocks.mainEvent({ type: 'tool.result', turnId: 3, toolCallId: 'tc_q', output: 'ok' }),
+        );
+        handler(mocks.mainEvent({ type: 'assistant.delta', turnId: 3, delta: 'final ' }));
+        handler(mocks.mainEvent({ type: 'assistant.delta', turnId: 3, delta: 'answer' }));
+        handler(mocks.mainEvent({ type: 'turn.ended', turnId: 3, reason: 'completed' }));
+      }
+    });
+    const stdout = writer();
+    const stderr = writer();
+
+    await runPrompt(opts({ quiet: true }), '1.2.3-test', { stdout, stderr });
+
+    expect(stdout.text()).toBe('final answer\n');
+    expect(stderr.text()).toContain('pondering');
+    expect(stderr.text()).toContain('To resume this session: kimi -r ses_prompt\n');
+  });
+
+  it('quiet mode falls back to the last completed message when the final step produces no text', async () => {
+    mocks.session.prompt.mockImplementationOnce(async () => {
+      for (const handler of mocks.eventHandlers) {
+        handler(
+          mocks.mainEvent({ type: 'turn.started', turnId: 4, origin: { kind: 'user' } }),
+        );
+        handler(mocks.mainEvent({ type: 'assistant.delta', turnId: 4, delta: 'only message' }));
+        handler(mocks.mainEvent({ type: 'turn.step.started', turnId: 4 }));
+        handler(mocks.mainEvent({ type: 'turn.ended', turnId: 4, reason: 'completed' }));
+      }
+    });
+    const stdout = writer();
+    const stderr = writer();
+
+    await runPrompt(opts({ quiet: true }), '1.2.3-test', { stdout, stderr });
+
+    expect(stdout.text()).toBe('only message\n');
+  });
+
+  it('quiet mode discards assistant text dropped by a step retry', async () => {
+    mocks.session.prompt.mockImplementationOnce(async () => {
+      for (const handler of mocks.eventHandlers) {
+        handler(
+          mocks.mainEvent({ type: 'turn.started', turnId: 5, origin: { kind: 'user' } }),
+        );
+        handler(mocks.mainEvent({ type: 'assistant.delta', turnId: 5, delta: 'partial junk' }));
+        handler(mocks.mainEvent({ type: 'turn.step.retrying', turnId: 5 }));
+        handler(mocks.mainEvent({ type: 'assistant.delta', turnId: 5, delta: 'clean answer' }));
+        handler(mocks.mainEvent({ type: 'turn.ended', turnId: 5, reason: 'completed' }));
+      }
+    });
+    const stdout = writer();
+    const stderr = writer();
+
+    await runPrompt(opts({ quiet: true }), '1.2.3-test', { stdout, stderr });
+
+    expect(stdout.text()).toBe('clean answer\n');
+  });
+
   it('resumes a concrete session without a configured default model', async () => {
     mocks.harnessGetConfig.mockResolvedValueOnce({ providers: {}, telemetry: true });
     mocks.session.getStatus.mockResolvedValueOnce({ permission: 'manual', model: 'saved-model' });

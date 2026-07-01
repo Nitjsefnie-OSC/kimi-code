@@ -390,6 +390,36 @@ describe('CLI options parsing', () => {
     });
   });
 
+  describe('--quiet', () => {
+    it('defaults to false', () => {
+      expect(parse([]).quiet).toBe(false);
+    });
+
+    it('parses --quiet in prompt mode', () => {
+      const opts = parse(['-p', 'run this', '--quiet']);
+      expect(opts.quiet).toBe(true);
+      expect(validateOptions(opts).uiMode).toBe('print');
+    });
+
+    it('parses the -q shorthand', () => {
+      expect(parse(['-p', 'run this', '-q']).quiet).toBe(true);
+    });
+
+    it('rejects --quiet outside prompt mode', () => {
+      const opts = parse(['--quiet']);
+      expect(() => validateOptions(opts)).toThrow(OptionConflictError);
+      expect(() => validateOptions(opts)).toThrow('--quiet is only supported in prompt mode.');
+    });
+
+    it('rejects --quiet with stream-json output', () => {
+      const opts = parse(['-p', 'run this', '--quiet', '--output-format=stream-json']);
+      expect(() => validateOptions(opts)).toThrow(OptionConflictError);
+      expect(() => validateOptions(opts)).toThrow(
+        'Cannot combine --quiet with --output-format stream-json.',
+      );
+    });
+  });
+
   describe('--skills-dir', () => {
     it('collects repeated skill directories', () => {
       expect(parse(['--skills-dir', '/one', '--skills-dir=/two']).skillsDirs).toEqual([
@@ -607,7 +637,6 @@ describe('CLI options parsing', () => {
         '--wire',
         '--raw-model',
         '--config-file=x',
-        '--quiet',
         '--final-message-only',
         '--input-format=text',
         '--mcp-config={}',

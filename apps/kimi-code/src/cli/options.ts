@@ -42,6 +42,7 @@ export interface CLIOptions {
   plan: boolean;
   model: string | undefined;
   outputFormat: PromptOutputFormat | undefined;
+  quiet?: boolean;
   prompt: string | undefined;
   skillsDirs: string[];
   agent: string | undefined;
@@ -75,6 +76,12 @@ export function validateOptions(
   }
   if (!promptMode && opts.outputFormat !== undefined) {
     throw new OptionConflictError('Output format is only supported in prompt mode.');
+  }
+  if (!promptMode && opts.quiet) {
+    throw new OptionConflictError('--quiet is only supported in prompt mode.');
+  }
+  if (opts.quiet && opts.outputFormat === 'stream-json') {
+    throw new OptionConflictError('Cannot combine --quiet with --output-format stream-json.');
   }
   if (promptMode && opts.yolo) {
     throw new OptionConflictError('Cannot combine --prompt with --yolo.');

@@ -66,6 +66,11 @@ export function createProgram(
         'Output format for prompt mode. Defaults to text.',
       ).choices(['text', 'stream-json']),
     )
+    .option(
+      '-q, --quiet',
+      'With --prompt: print only the final assistant message instead of the streamed transcript.',
+      false,
+    )
     .addOption(
       new Option(
         '--skills-dir <dir>',
@@ -158,6 +163,7 @@ export function createProgram(
       plan: raw['plan'] as boolean,
       model: raw['model'] as string | undefined,
       outputFormat: raw['outputFormat'] as CLIOptions['outputFormat'],
+      quiet: raw['quiet'] === true,
       prompt: raw['prompt'] as string | undefined,
       skillsDirs: raw['skillsDir'] as string[],
       agent: raw['agent'] as string | undefined,
