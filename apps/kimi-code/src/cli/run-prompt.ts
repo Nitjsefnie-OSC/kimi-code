@@ -30,7 +30,12 @@ import {
   type HeadlessGoalCreate,
 } from './goal-prompt';
 import type { PromptHarness, PromptSession } from './prompt-session';
-import { PromptJsonWriter, PromptTranscriptWriter, writeResumeHint } from './prompt-render';
+import {
+  PromptJsonWriter,
+  PromptQuietWriter,
+  PromptTranscriptWriter,
+  writeResumeHint,
+} from './prompt-render';
 import { createCliTelemetryBootstrap, initializeCliTelemetry } from './telemetry';
 import { createKimiCodeHostIdentity } from './version';
 
@@ -203,12 +208,21 @@ export async function runPrompt(
     // distinct exit code.
     const goalCreate = parseHeadlessGoalCreate(opts.prompt!);
     if (goalCreate !== undefined) {
-      await runHeadlessGoal(session, goalCreate, goalModel, outputFormat, stdout, stderr);
+      await runHeadlessGoal(
+        session,
+        goalCreate,
+        goalModel,
+        outputFormat,
+        opts.quiet === true,
+        stdout,
+        stderr,
+      );
     } else {
       await runPromptTurn(
         session as PrintTurnSession,
         opts.prompt!,
         outputFormat,
+        opts.quiet === true,
         stdout,
         stderr,
       );
@@ -236,6 +250,7 @@ async function runHeadlessGoal(
   goal: HeadlessGoalCreate,
   model: string | undefined,
   outputFormat: PromptOutputFormat,
+  quiet: boolean,
   stdout: PromptOutput,
   stderr: PromptOutput,
 ): Promise<void> {
@@ -262,6 +277,7 @@ async function runHeadlessGoal(
       session as PrintTurnSession,
       goal.objective,
       outputFormat,
+      quiet,
       stdout,
       stderr,
     );
@@ -469,6 +485,7 @@ function runPromptTurn(
   session: PrintTurnSession,
   prompt: string,
   outputFormat: PromptOutputFormat,
+  quiet: boolean,
   stdout: PromptOutput,
   stderr: PromptOutput,
 ): Promise<void> {
@@ -477,7 +494,9 @@ function runPromptTurn(
   const outputWriter =
     outputFormat === 'stream-json'
       ? new PromptJsonWriter(stdout)
-      : new PromptTranscriptWriter(stdout, stderr);
+      : quiet
+        ? new PromptQuietWriter(stdout, stderr)
+        : new PromptTranscriptWriter(stdout, stderr);
   let settled = false;
   let unsubscribe: (() => void) | undefined;
   // A `kimi -p` run is not done just because the model ended a turn: an active
