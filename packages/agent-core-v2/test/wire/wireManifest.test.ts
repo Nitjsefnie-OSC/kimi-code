@@ -18,7 +18,9 @@ describe('wire manifest', () => {
     const expected = await buildWireManifest();
     const actual = readFileSync(MANIFEST_PATH, 'utf-8');
     expect(actual).toBe(expected);
-  }, 60_000);
+    // The rebuild walks every Op's payload type, so its cost grows with the
+    // registry; 60s left no headroom on a loaded machine.
+  }, 180_000);
 
   it('docs/wire-manifest.d.ts parses as TypeScript', () => {
     const project = new Project({ useInMemoryFileSystem: true });

@@ -1,12 +1,15 @@
 /**
  * `llmRequester` domain — durable request-trace wire Model and Ops.
  *
- * Defines `llm.tools_snapshot` snapshots and `llm.request` outbound request
- * traces, with replay restoring only the snapshot de-dup cursor.
+ * Defines `llm.tools_snapshot` snapshots, `llm.request` outbound request traces
+ * and `llm.error` failed-request traces, with replay restoring only the
+ * snapshot de-dup cursor. Consumed by the Agent-scope `llmRequester`
+ * implementation.
  */
 
 import { z } from 'zod';
 
+import type { ApiErrorKind } from '#/kosong/contract/errors';
 import type { ThinkingEffort } from '#/kosong/contract/provider';
 import { defineModel } from '#/wire/model';
 
@@ -35,6 +38,7 @@ declare module '#/wire/types' {
   interface PersistedOpMap {
     'llm.tools_snapshot': typeof llmToolsSnapshot;
     'llm.request': typeof llmRequest;
+    'llm.error': typeof llmError;
   }
 }
 
@@ -70,6 +74,38 @@ export const llmRequest = LlmRequestTraceModel.defineOp('llm.request', {
     attempt: z.string().optional(),
     projection: z.enum(['strict', 'media-degraded', 'media-stripped']).optional(),
     droppedCount: z.number().optional(),
+  }),
+  apply: (s) => s,
+});
+
+/**
+ * Upper bound on the journaled provider error message. Provider messages are
+ * unbounded free text, so they are truncated before they reach the journal.
+ */
+export const LLM_ERROR_MESSAGE_MAX_LENGTH = 500;
+
+/**
+ * A failed outbound request. Journaled for every non-aborted provider failure,
+ * retryable or not — notably `quota_exhausted`, which `isRetryableGenerateError`
+ * excludes from the retry path, so it never surfaces as `turn.step.retrying`.
+ * `kind` carries the same classification as the `api_error` telemetry event, so
+ * a reader can tell a transient 429 (`rate_limit`) from a hard quota stop
+ * (`quota_exhausted`) without matching on message text.
+ */
+export const llmError = LlmRequestTraceModel.defineOp('llm.error', {
+  schema: z.object({
+    kind: z.custom<ApiErrorKind>(),
+    statusCode: z.number().optional(),
+    retryable: z.boolean(),
+    errorName: z.string(),
+    message: z.string(),
+    model: z.string(),
+    modelAlias: z.string().optional(),
+    requestKind: z.string().optional(),
+    turnId: z.number().optional(),
+    step: z.number().optional(),
+    durationMs: z.number(),
+    traceId: z.string().optional(),
   }),
   apply: (s) => s,
 });
