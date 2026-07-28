@@ -21,7 +21,7 @@
 // owning model offloads inline media to blob storage), cross-reducers
 // (foreign models that also reduce this record on dispatch and replay).
 
-// Index (46 record types)
+// Index (47 record types)
 //   config.update                      profile               persisted  src/agent/profile/profileOps.ts
 //   context_size.measured              contextSize           transient  src/agent/contextSize/contextSizeOps.ts
 //   context.append_loop_event          contextMemory         persisted  src/agent/contextMemory/contextOps.ts
@@ -42,6 +42,7 @@
 //   interaction.request                interaction           persisted  src/session/interaction/interactionOps.ts
 //   interaction.resolved               interaction           persisted  src/session/interaction/interactionOps.ts
 //   interruptionReminder.recorded      interruptionReminder  persisted  src/agent/interruptionReminder/interruptionReminderOps.ts
+//   llm.error                          llm.requestTrace      persisted  src/agent/llmRequester/llmRequestOps.ts
 //   llm.request                        llm.requestTrace      persisted  src/agent/llmRequester/llmRequestOps.ts
 //   llm.tools_snapshot                 llm.requestTrace      persisted  src/agent/llmRequester/llmRequestOps.ts
 //   mcp.tools_discovered               mcp.discovery         persisted  src/agent/mcp/mcpDiscoveryOps.ts
@@ -315,6 +316,27 @@ interface InteractionResolvedPayload {
 interface InterruptionReminderRecordedPayload {
   _name: 'interruptionReminder.recorded';
   turnId: number;
+}
+
+/**
+ * model: llm.requestTrace · persisted
+ * owner: src/agent/llmRequester/llmRequestOps.ts
+ */
+interface LlmErrorPayload {
+  _name: 'llm.error';
+  /** ApiErrorKind */
+  kind: 'context_overflow' | 'overloaded' | 'rate_limit' | 'quota_exhausted' | 'auth' | '5xx_server' | '4xx_client' | 'network' | 'timeout' | 'empty_response' | 'other';
+  statusCode?: number;
+  retryable: boolean;
+  errorName: string;
+  message: string;
+  model: string;
+  modelAlias?: string;
+  requestKind?: string;
+  turnId?: number;
+  step?: number;
+  durationMs: number;
+  traceId?: string;
 }
 
 /**
@@ -702,6 +724,7 @@ interface WirePayloadMap {
   "interaction.request": InteractionRequestPayload;
   "interaction.resolved": InteractionResolvedPayload;
   "interruptionReminder.recorded": InterruptionReminderRecordedPayload;
+  "llm.error": LlmErrorPayload;
   "llm.request": LlmRequestPayload;
   "llm.tools_snapshot": LlmToolsSnapshotPayload;
   "mcp.tools_discovered": McpToolsDiscoveredPayload;

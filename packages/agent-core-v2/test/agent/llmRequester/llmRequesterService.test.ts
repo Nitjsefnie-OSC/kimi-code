@@ -39,9 +39,13 @@ import { type DomainEvent, IEventBus } from '#/app/event/eventBus';
 import {
   APIConnectionError,
   APIEmptyResponseError,
+  APIProviderQuotaExhaustedError,
+  APIProviderRateLimitError,
   APIRequestTooLargeError,
   APIStatusError,
+  isRetryableGenerateError,
 } from '#/kosong/contract/errors';
+import { LLM_ERROR_MESSAGE_MAX_LENGTH } from '#/agent/llmRequester/llmRequestOps';
 import { emptyUsage } from '#/kosong/contract/usage';
 import type { Message } from '#/kosong/contract/message';
 import type { ThinkingEffort } from '#/kosong/contract/provider';
@@ -769,5 +773,75 @@ describe('AgentLLMRequesterService trace id', () => {
     expect(
       telemetryRecords.find((record) => record.event === 'api_error')?.properties?.['trace_id'],
     ).toBeUndefined();
+  });
+});
+
+describe('AgentLLMRequesterService api error journaling', () => {
+  const projector = {
+    project: (messages: readonly ContextMessage[]) => messages,
+    projectStrict: (messages: readonly ContextMessage[]) => messages,
+  };
+
+  async function journaledErrors(error: Error): Promise<readonly WireRecord[]> {
+    // Fail every attempt, so an in-service recovery cannot turn the failure
+    // into a success and hide the journaled record.
+    const requester = createRequester({ value: 0 }, error, [error, error, error]);
+    const { service, wire, records } = createService(requester, projector);
+    const request = service.start({ source: { type: 'turn', turnId: 7, step: 4 } });
+    await expect(request.result).rejects.toThrow();
+    await wire.flush();
+    return records.filter((record) => record.type === 'llm.error');
+  }
+
+  it('journals a quota exhaustion, which the retry path never sees', async () => {
+    // `isRetryableGenerateError` excludes quota exhaustion, so it is never
+    // claimed by `stepRetry` and never published as `turn.step.retrying`.
+    // The journal is the only place a hard quota stop can be observed.
+    expect(isRetryableGenerateError(new APIProviderQuotaExhaustedError('out of usage'))).toBe(
+      false,
+    );
+
+    const journaled = await journaledErrors(
+      new APIProviderQuotaExhaustedError('You are out of extra usage'),
+    );
+
+    expect(journaled).toHaveLength(1);
+    expect(journaled[0]).toMatchObject({
+      type: 'llm.error',
+      kind: 'quota_exhausted',
+      statusCode: 429,
+      retryable: false,
+      errorName: 'APIProviderQuotaExhaustedError',
+      message: 'You are out of extra usage',
+      turnId: 7,
+      step: 4,
+    });
+  });
+
+  it('separates a transient rate limit from a quota stop at the same status code', async () => {
+    const journaled = await journaledErrors(
+      new APIProviderRateLimitError('Server is temporarily limiting requests'),
+    );
+
+    expect(journaled[0]).toMatchObject({
+      kind: 'rate_limit',
+      statusCode: 429,
+      retryable: true,
+    });
+  });
+
+  it('truncates an unbounded provider message', async () => {
+    const journaled = await journaledErrors(
+      new APIProviderQuotaExhaustedError('x'.repeat(LLM_ERROR_MESSAGE_MAX_LENGTH + 200)),
+    );
+
+    expect((journaled[0]?.['message'] as string).length).toBe(LLM_ERROR_MESSAGE_MAX_LENGTH);
+  });
+
+  it('does not journal a user abort', async () => {
+    const abort = new Error('aborted');
+    abort.name = 'AbortError';
+
+    expect(await journaledErrors(abort)).toEqual([]);
   });
 });

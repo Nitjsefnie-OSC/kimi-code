@@ -90,7 +90,9 @@ import {
 } from './llmRequester';
 import type { LLMRequestTrace } from '#/kosong/contract/requestTrace';
 import {
+  LLM_ERROR_MESSAGE_MAX_LENGTH,
   LlmRequestTraceModel,
+  llmError,
   llmRequest,
   llmToolsSnapshot,
   type LlmRequestToolSchema,
@@ -289,17 +291,22 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     const modelAlias = this.profile.data().modelAlias;
     const model = this.tryGetModel();
     const traceId = requestTraceId ?? apiTraceId(error);
-    const classification = classifyApiError(unwrapErrorCause(error));
+    const cause = unwrapErrorCause(error);
+    const classification = classifyApiError(cause);
+    const resolvedModel = model?.id ?? modelAlias ?? 'unknown';
+    const retryable = isRetryableGenerateError(error);
+    const durationMs = Math.max(0, Date.now() - startedAt);
+    const requestKind = requestKindForTelemetry(source);
     const properties: ApiErrorEvent = {
       error_type: classification.kind,
-      model: model?.id ?? modelAlias ?? 'unknown',
+      model: resolvedModel,
       alias: modelAlias,
       provider_type: model?.providerType ?? model?.protocol,
       protocol: model?.protocol,
-      retryable: isRetryableGenerateError(error),
-      duration_ms: Math.max(0, Date.now() - startedAt),
+      retryable,
+      duration_ms: durationMs,
       turn_id: source?.turnId,
-      request_kind: requestKindForTelemetry(source),
+      request_kind: requestKind,
       trace_id: traceId,
     };
     if (source?.type === 'turn') {
@@ -310,6 +317,23 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     const currentTurn = this.usage.status().currentTurn;
     if (currentTurn !== undefined) properties['input_tokens'] = inputTotal(currentTurn);
     this.telemetry.track2('api_error', properties);
+    const { errorName, errorMessage } = retryErrorFields(cause);
+    this.wire.dispatch(
+      llmError({
+        kind: classification.kind,
+        statusCode,
+        retryable,
+        errorName,
+        message: truncateErrorMessage(errorMessage),
+        model: resolvedModel,
+        modelAlias,
+        requestKind,
+        turnId: source?.turnId,
+        step: source?.type === 'turn' ? source.step : undefined,
+        durationMs,
+        traceId,
+      }),
+    );
     return traceId;
   }
 
@@ -800,6 +824,12 @@ function projectionField(
 
 function fingerprint(content: string): string {
   return createHash('sha256').update(content).digest('hex');
+}
+
+function truncateErrorMessage(message: string): string {
+  return message.length <= LLM_ERROR_MESSAGE_MAX_LENGTH
+    ? message
+    : message.slice(0, LLM_ERROR_MESSAGE_MAX_LENGTH);
 }
 
 function apiStatusCode(error: unknown): number | undefined {
