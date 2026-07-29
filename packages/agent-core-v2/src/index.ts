@@ -297,6 +297,8 @@ export * from '#/agent/tools/task/task-output/task-output';
 import '#/agent/tools/task/task-output/taskOutputTool';
 export * from '#/agent/tools/task/task-stop/task-stop';
 import '#/agent/tools/task/task-stop/taskStopTool';
+export * from '#/agent/tools/task/monitor/monitor';
+import '#/agent/tools/task/monitor/monitorTool';
 export * from '#/agent/tools/state/whoami/whoami';
 import '#/agent/tools/state/whoami/whoamiTool';
 export * from '#/agent/task/task';
