@@ -2,7 +2,11 @@ import { z } from 'zod';
 
 import { isoDateTimeSchema } from '@moonshot-ai/agent-core-v2/_base/utils/isoDateTime';
 
-export const taskKindSchema = z.enum(['subagent', 'bash', 'tool']);
+// 'monitor' extends the upstream spec set, mirroring packages/protocol: the
+// Monitor tool's background tasks are a first-class wire kind on both engines,
+// so REST clients can tell them apart from generic tool tasks instead of
+// having them collapse into 'tool'.
+export const taskKindSchema = z.enum(['subagent', 'bash', 'tool', 'monitor']);
 export type TaskKind = z.infer<typeof taskKindSchema>;
 
 export const taskStatusSchema = z.enum([
