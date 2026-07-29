@@ -637,6 +637,29 @@ export class TurnFlow {
         errorEvent = { type: 'error', ...summary };
         if (this.shouldTrackApiError(turnId)) {
           const classification = classifyApiError(error, summary);
+          // Journal the failure too, so it is reconstructable from the wire
+          // log and not only from live telemetry. Same gate as the telemetry
+          // event on purpose: it means the turn failed at an actual model
+          // step, which is what makes this a request failure rather than any
+          // turn error.
+          this.agent.records.logRecord({
+            type: 'llm.error',
+            kind: classification.errorType,
+            ...(classification.statusCode !== undefined
+              ? { statusCode: classification.statusCode }
+              : {}),
+            retryable: summary.retryable,
+            ...(summary.name !== undefined ? { errorName: summary.name } : {}),
+            message: truncateErrorMessage(summary.message),
+            // `config.model` throws when no model is set, and returns the
+            // alias anyway — read the alias, which cannot throw.
+            model: this.agent.config.modelAlias ?? 'unknown',
+            turnId,
+            durationMs: Date.now() - startedAt,
+            ...(this.activeRequestTrace?.traceId !== undefined
+              ? { traceId: this.activeRequestTrace.traceId }
+              : {}),
+          });
           const properties: Record<string, TelemetryPropertyValue> = {
             error_type: classification.errorType,
             model: this.agent.config.model,
@@ -1541,6 +1564,18 @@ function telemetryInterruptReason(
 interface ApiErrorClassification {
   readonly errorType: string;
   readonly statusCode?: number;
+}
+
+/**
+ * Upper bound on the journaled provider error message. Provider messages are
+ * unbounded free text, so they are truncated before they reach the journal.
+ */
+const LLM_ERROR_MESSAGE_MAX_LENGTH = 500;
+
+function truncateErrorMessage(message: string): string {
+  return message.length > LLM_ERROR_MESSAGE_MAX_LENGTH
+    ? message.slice(0, LLM_ERROR_MESSAGE_MAX_LENGTH)
+    : message;
 }
 
 function classifyApiError(error: unknown, summary: KimiErrorPayload): ApiErrorClassification {
