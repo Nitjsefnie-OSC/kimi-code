@@ -219,6 +219,32 @@ export interface AgentRecordEvents {
   };
 
   /**
+   * One failed outbound model request. Written for every non-aborted
+   * provider failure, retryable or not — notably `quota_exhausted`, which
+   * fails fast instead of retrying, so it never appears as a retry event.
+   *
+   * `kind` carries the same classification as the `api_error` telemetry
+   * event, so a reader tells a transient 429 (`rate_limit`) from a hard
+   * quota stop (`quota_exhausted`) without matching on message text.
+   * Provider messages are unbounded free text and are truncated to
+   * `LLM_ERROR_MESSAGE_MAX_LENGTH` before reaching the journal. Aborts are
+   * not recorded: a cancellation is not an API error.
+   */
+  'llm.error': {
+    kind: string;
+    statusCode?: number;
+    retryable: boolean;
+    /** Error class name, when the serialized failure carries one. */
+    errorName?: string;
+    message: string;
+    /** On this engine the model id IS the configured alias. */
+    model: string;
+    turnId?: number;
+    durationMs: number;
+    traceId?: string;
+  };
+
+  /**
    * Raw MCP `tools/list` result as advertised by the server, plus how this
    * agent gated it (allow-list, name collisions). Written on registration,
    * deduplicated per server by content hash.

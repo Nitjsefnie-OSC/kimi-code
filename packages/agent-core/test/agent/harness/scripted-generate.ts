@@ -17,6 +17,10 @@ import {
 
 type GenerateFn = NonNullable<AgentOptions['generate']>;
 
+interface ScriptedFailure {
+  readonly error: unknown;
+}
+
 interface ScriptedResponse {
   readonly parts: readonly StreamedMessagePart[];
   readonly finishReason?: FinishReason | null | undefined;
@@ -26,11 +30,20 @@ interface ScriptedResponse {
 
 export function createScriptedGenerate() {
   const calls: GenerateCall[] = [];
-  const responses: ScriptedResponse[] = [];
+  const responses: (ScriptedResponse | ScriptedFailure)[] = [];
   let assertedCallCount = 0;
 
   function mockNextResponse(...response: StreamedMessagePart[]) {
     responses.push({ parts: structuredClone(response) });
+  }
+
+  /**
+   * Queue a provider failure for the next generate call. The error is thrown
+   * from inside generate, exactly where a real provider error surfaces, so
+   * the turn's own failure handling runs unmodified.
+   */
+  function mockNextError(error: unknown) {
+    responses.push({ error });
   }
 
   function mockNextProviderResponse(input: {
@@ -54,6 +67,9 @@ export function createScriptedGenerate() {
     const response = responses.shift();
     if (response === undefined) {
       throw new Error(`Unexpected generate call #${String(calls.length + 1)}`);
+    }
+    if ('error' in response) {
+      throw response.error;
     }
 
     const input = normalizeGenerateInput({
@@ -138,6 +154,7 @@ export function createScriptedGenerate() {
     },
     mockNextResponse,
     mockNextProviderResponse,
+    mockNextError,
   };
 }
 

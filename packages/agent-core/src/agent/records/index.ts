@@ -171,6 +171,8 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       return;
     case 'llm.request':
       return;
+    case 'llm.error':
+      return;
     case 'mcp.tools_discovered':
       agent.tools.restoreMcpDiscovery(input.serverName, input.hash);
       return;

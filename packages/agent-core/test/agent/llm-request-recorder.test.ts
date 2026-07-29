@@ -1,3 +1,4 @@
+import { APIProviderQuotaExhaustedError } from '@moonshot-ai/kosong';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentRecord } from '../../src/agent';
@@ -403,5 +404,60 @@ describe('mcp.tools_discovered records', () => {
     const all = recordsOf(persistence, 'mcp.tools_discovered');
     expect(all).toHaveLength(2);
     expect(all[1]!.collisions).toBeUndefined();
+  });
+});
+
+describe('llm error records', () => {
+  it('journals a quota-exhausted provider failure as llm.error', async () => {
+    const persistence = new InMemoryAgentRecordPersistence();
+    const ctx = testAgent({ persistence });
+    ctx.configure();
+
+    ctx.mockNextError(
+      new APIProviderQuotaExhaustedError('You have exhausted your quota.'),
+    );
+    await runTurn(ctx, 'first');
+
+    const errors = recordsOf(persistence, 'llm.error');
+    expect(errors).toHaveLength(1);
+    const error = errors[0]!;
+    // The classification is the whole point: a reader tells a hard quota stop
+    // from a transient 429 off this field, without matching message text.
+    expect(error.kind).toBe('quota_exhausted');
+    expect(error.statusCode).toBe(429);
+    expect(error.retryable).toBe(false);
+    expect(error.errorName).toBe('APIProviderQuotaExhaustedError');
+    expect(error.message).toContain('exhausted your quota');
+    expect(error.model).toBe('mock-model');
+    expect(error.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  // A transient 429 is deliberately NOT asserted here: it is retryable, so
+  // driving one through this harness costs the full 10-attempt backoff
+  // budget. `kind` is the classifier's own output either way — this case
+  // pins that it is passed through rather than hardcoded to the quota value.
+  it('records the classifier kind, not a hardcoded quota value', async () => {
+    const persistence = new InMemoryAgentRecordPersistence();
+    const ctx = testAgent({ persistence });
+    ctx.configure();
+
+    ctx.mockNextError(new Error('something else broke'));
+    await runTurn(ctx, 'first');
+
+    const errors = recordsOf(persistence, 'llm.error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.kind).not.toBe('quota_exhausted');
+    expect(errors[0]!.statusCode).toBeUndefined();
+  });
+
+  it('does not journal an llm.error for a successful request', async () => {
+    const persistence = new InMemoryAgentRecordPersistence();
+    const ctx = testAgent({ persistence });
+    ctx.configure();
+
+    ctx.mockNextResponse({ type: 'text', text: 'fine' });
+    await runTurn(ctx, 'first');
+
+    expect(recordsOf(persistence, 'llm.error')).toHaveLength(0);
   });
 });
