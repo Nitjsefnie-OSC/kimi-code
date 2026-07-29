@@ -314,6 +314,11 @@ function mapKind(k: AgentTaskInfo['kind']): TaskKind {
       // SCHEMAS §7 has no 'question' literal; question tasks are
       // tool-spawned flows, so 'tool' is the closest spec literal.
       return 'tool';
+    case 'monitor':
+      // 'monitor' is a first-class wire kind (it is in taskKindSchema), so
+      // emit it directly — REST clients can distinguish Monitor tasks from
+      // generic tool/question tasks. Mirrors v1's mapKind.
+      return 'monitor';
   }
 }
 

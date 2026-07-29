@@ -654,6 +654,71 @@ export const WIRE_RENDERERS: RendererMap = {
     }),
   },
 
+  'llm.error': {
+    tone: 'meta',
+    label: 'llm✗',
+    headline: (r) => {
+      const parts: string[] = [];
+      if (r.statusCode !== undefined) parts.push(`HTTP ${r.statusCode}`);
+      if (r.errorName !== undefined) parts.push(r.errorName);
+      parts.push(`${r.durationMs} ms`);
+      return {
+        main: (
+          <span className="flex items-center gap-2 min-w-0">
+            <Pill tone="warning" variant="soft">
+              {r.kind}
+            </Pill>
+            <Mono>{r.model}</Mono>
+            <Dim className="truncate">{parts.join(' · ')}</Dim>
+          </span>
+        ),
+        right: r.retryable ? (
+          <Pill tone="warning" variant="soft">
+            retryable
+          </Pill>
+        ) : undefined,
+      };
+    },
+    detail: (r) => (
+      <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-[2px]">
+        <FieldRow label="kind">
+          <Mono>{r.kind}</Mono>
+        </FieldRow>
+        {r.statusCode !== undefined ? (
+          <FieldRow label="statusCode">
+            <Mono>{String(r.statusCode)}</Mono>
+          </FieldRow>
+        ) : null}
+        <FieldRow label="retryable">
+          <Mono>{String(r.retryable)}</Mono>
+        </FieldRow>
+        {r.errorName !== undefined ? (
+          <FieldRow label="errorName">
+            <Mono>{r.errorName}</Mono>
+          </FieldRow>
+        ) : null}
+        <FieldRow label="model">
+          <Mono>{r.model}</Mono>
+        </FieldRow>
+        <FieldRow label="durationMs">
+          <Mono>{String(r.durationMs)}</Mono>
+        </FieldRow>
+        {r.turnId !== undefined ? (
+          <FieldRow label="turnId">
+            <Mono>{String(r.turnId)}</Mono>
+          </FieldRow>
+        ) : null}
+        {r.traceId !== undefined ? (
+          <FieldRow label="traceId">
+            <Mono>{r.traceId}</Mono>
+          </FieldRow>
+        ) : null}
+        <FieldRow label="message">
+          <Mono>{r.message}</Mono>
+        </FieldRow>
+      </div>
+    ),
+  },
   'llm.request': {
     tone: 'meta',
     label: 'llm→',
