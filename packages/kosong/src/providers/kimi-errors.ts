@@ -21,6 +21,18 @@ const KIMI_QUOTA_EXHAUSTED_MESSAGE_PATTERNS = [
   /account (?:is )?in arrears/,
 ] as const;
 
+// The kimi.com SUBSCRIPTION (kimi-code) reports an exhausted plan as HTTP 403
+// with its own wording — "You've reached your usage limit for this billing
+// cycle ... purchase extra usage or upgrade your plan" — which matches none of
+// the platform-API patterns above. Observed verbatim on an exhausted account,
+// 2026-07-29; it otherwise classifies as `auth`, indistinguishable from a bad
+// key. Kept separate from the 429 list so a 403 carrying platform wording
+// still answers undefined, as upstream intends.
+const KIMI_SUBSCRIPTION_QUOTA_MESSAGE_PATTERNS = [
+  /reached your usage limit/,
+  /purchase extra usage/,
+] as const;
+
 function readStringProp(value: object, key: string): string | undefined {
   const raw = (value as Record<string, unknown>)[key];
   return typeof raw === 'string' ? raw : undefined;
@@ -64,16 +76,20 @@ export function classifyKimiQuotaError(
 ): APIProviderQuotaExhaustedError | undefined {
   if (typeof error !== 'object' || error === null) return undefined;
   const status = (error as Record<string, unknown>)['status'];
-  if (status !== 429) return undefined;
+  if (status !== 429 && status !== 403) return undefined;
 
   const message = readStringProp(error, 'message') ?? '';
-  const structuredHit = collectErrorCodes(error).some((code) =>
-    KIMI_QUOTA_EXHAUSTED_ERROR_CODES.has(code),
-  );
+  // A 403 is only ever a quota stop on the subscription's own wording; the
+  // platform's structured codes and 429 wording do not apply to it.
+  const structuredHit =
+    status === 429 &&
+    collectErrorCodes(error).some((code) => KIMI_QUOTA_EXHAUSTED_ERROR_CODES.has(code));
   const lowerMessage = message.toLowerCase();
-  const wordingHit = KIMI_QUOTA_EXHAUSTED_MESSAGE_PATTERNS.some((pattern) =>
-    pattern.test(lowerMessage),
-  );
+  const patterns =
+    status === 403
+      ? KIMI_SUBSCRIPTION_QUOTA_MESSAGE_PATTERNS
+      : KIMI_QUOTA_EXHAUSTED_MESSAGE_PATTERNS;
+  const wordingHit = patterns.some((pattern) => pattern.test(lowerMessage));
   if (!structuredHit && !wordingHit) return undefined;
 
   const requestId = readStringProp(error, 'requestID') ?? null;
