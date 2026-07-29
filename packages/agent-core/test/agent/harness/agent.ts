@@ -161,6 +161,7 @@ export class AgentTestContext {
   readonly llmInputs = this.scriptedGenerate.inputs;
   readonly mockNextResponse = this.scriptedGenerate.mockNextResponse;
   readonly mockNextProviderResponse = this.scriptedGenerate.mockNextProviderResponse;
+  readonly mockNextError = this.scriptedGenerate.mockNextError;
 
   private kimiConfig: KimiConfig;
 
