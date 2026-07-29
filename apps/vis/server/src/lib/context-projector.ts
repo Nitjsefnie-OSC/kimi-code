@@ -518,6 +518,7 @@ export function projectContext(
       case 'tools.reset_active_tools':
       case 'llm.tools_snapshot':
       case 'llm.request':
+      case 'llm.error':
       case 'mcp.tools_discovered':
         break;
       default: {
