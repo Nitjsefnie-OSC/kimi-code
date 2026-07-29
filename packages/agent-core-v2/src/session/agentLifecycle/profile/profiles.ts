@@ -45,6 +45,7 @@ const AGENT_TOOLS = [
   'GetGoal',
   'SetGoalBudget',
   'UpdateGoal',
+  'Whoami',
   'mcp__*',
 ] as const;
 
@@ -69,6 +70,7 @@ const CODER_TOOLS = [
   'TodoList',
   'WebSearch',
   'FetchURL',
+  'Whoami',
   'Write',
   'mcp__*',
 ] as const;
