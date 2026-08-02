@@ -47,6 +47,7 @@ describe('CLI options parsing', () => {
       expect(opts.model).toBeUndefined();
       expect(opts.outputFormat).toBeUndefined();
       expect(opts.prompt).toBeUndefined();
+      expect(opts.initialPrompt).toBeUndefined();
       expect(opts.skillsDirs).toEqual([]);
       expect(opts.agent).toBeUndefined();
       expect(opts.agentFiles).toEqual([]);
@@ -292,6 +293,12 @@ describe('CLI options parsing', () => {
       expect(() => validateOptions(opts)).toThrow('Cannot combine --prompt with --plan.');
     });
 
+    it('leaves interactive mode untouched when --initial-prompt is absent', () => {
+      const opts = parse([]);
+      expect(opts.initialPrompt).toBeUndefined();
+      expect(validateOptions(opts).uiMode).toBe('shell');
+    });
+
     it('parses --output-format=stream-json in prompt mode', () => {
       const opts = parse(['-p', 'run this', '--output-format=stream-json']);
       expect(opts.outputFormat).toBe('stream-json');
@@ -396,6 +403,56 @@ describe('CLI options parsing', () => {
         '/one',
         '/two',
       ]);
+    });
+  });
+
+  describe('--initial-prompt', () => {
+    it('carries the text and stays in interactive shell mode', () => {
+      const opts = parse(['--initial-prompt', 'read the brief and start']);
+      expect(opts.initialPrompt).toBe('read the brief and start');
+      expect(opts.prompt).toBeUndefined();
+      // The whole point of the flag: a normal interactive session, not `-p`.
+      expect(validateOptions(opts).uiMode).toBe('shell');
+    });
+
+    it('parses --initial-prompt=value', () => {
+      const opts = parse(['--initial-prompt=read the brief and start']);
+      expect(opts.initialPrompt).toBe('read the brief and start');
+      expect(validateOptions(opts).uiMode).toBe('shell');
+    });
+
+    it('rejects empty initial prompt values', () => {
+      const opts = parse(['--initial-prompt', '   ']);
+      expect(() => validateOptions(opts)).toThrow(OptionConflictError);
+      expect(() => validateOptions(opts)).toThrow('Initial prompt cannot be empty.');
+    });
+
+    it('rejects combining --initial-prompt with --prompt', () => {
+      const opts = parse(['-p', 'one shot', '--initial-prompt', 'interactive brief']);
+      expect(() => validateOptions(opts)).toThrow(OptionConflictError);
+      expect(() => validateOptions(opts)).toThrow(
+        'Cannot combine --prompt with --initial-prompt',
+      );
+    });
+
+    it('keeps interactive-only flags usable alongside it', () => {
+      const opts = parse(['--initial-prompt', 'go', '--yolo', '--plan']);
+      expect(opts.initialPrompt).toBe('go');
+      expect(validateOptions(opts).uiMode).toBe('shell');
+    });
+
+    it('documents the interactive-vs-one-shot distinction in --help', () => {
+      const help = createProgram('0.1.0-test', () => {}, () => {}).helpInformation();
+      const normalizedHelp = help.replaceAll(/\s+/g, ' ');
+
+      expect(normalizedHelp).toContain('--initial-prompt <prompt>');
+      expect(normalizedHelp).toContain(
+        'Start the interactive session and submit this text as the first message.',
+      );
+      expect(normalizedHelp).toContain('the session stays open afterwards');
+      expect(normalizedHelp).toContain(
+        'Run one prompt non-interactively, print the response, and exit.',
+      );
     });
   });
 

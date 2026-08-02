@@ -1935,6 +1935,92 @@ describe('KimiTUI startup', () => {
     });
     expect(driver.state.appState.sessionId).toBe('ses-target');
   });
+
+  describe('--initial-prompt', () => {
+    interface InitialPromptDriver extends StartupDriver {
+      finishStartup(shouldReplayHistory: boolean): Promise<void>;
+      handleUserInput(text: string): void;
+    }
+
+    function makeInitialPromptDriver(initialPrompt?: string) {
+      const session = makeSession();
+      const harness = makeHarness(session);
+      const driver = makeDriver(
+        harness,
+        makeStartupInput(initialPrompt === undefined ? {} : { initialPrompt }),
+      ) as unknown as InitialPromptDriver;
+      const handleUserInput = vi.spyOn(driver, 'handleUserInput').mockImplementation(() => {});
+      const stop = vi.spyOn(driver, 'stop').mockImplementation(async () => {});
+      return { driver, harness, session, handleUserInput, stop };
+    }
+
+    it('submits the startup text as the first user turn', async () => {
+      const { driver, handleUserInput } = makeInitialPromptDriver('read the brief and start');
+
+      await expect(driver.init()).resolves.toBe(false);
+      await driver.finishStartup(false);
+
+      // Same seam the editor uses when the user types and presses enter.
+      expect(handleUserInput).toHaveBeenCalledOnce();
+      expect(handleUserInput).toHaveBeenCalledWith('read the brief and start');
+    });
+
+    it('keeps the session alive after submitting the first turn', async () => {
+      const { driver, session, stop } = makeInitialPromptDriver('go');
+
+      await expect(driver.init()).resolves.toBe(false);
+      await driver.finishStartup(false);
+
+      // Unlike `kimi -p`, seeding the first turn must not tear anything down:
+      // no shutdown, no session close, and the TUI is still 'ready'.
+      expect(stop).not.toHaveBeenCalled();
+      expect(session.close).not.toHaveBeenCalled();
+      expect(driver.state.startupState).toBe('ready');
+    });
+
+    it('submits the text only once', async () => {
+      const { driver, handleUserInput } = makeInitialPromptDriver('go');
+
+      await expect(driver.init()).resolves.toBe(false);
+      await driver.finishStartup(false);
+      await driver.finishStartup(false);
+
+      expect(handleUserInput).toHaveBeenCalledOnce();
+    });
+
+    it('submits the startup text after the bare --session picker resolves', async () => {
+      const session = makeSession({ id: 'ses-picked' });
+      const harness = makeHarness(session, {
+        listSessions: vi.fn(async () => [{ id: 'ses-picked', workDir: '/tmp/proj-a' }]),
+      });
+      const driver = makeDriver(
+        harness,
+        makeStartupInput({ session: '', initialPrompt: 'go' }),
+      ) as unknown as InitialPromptDriver & {
+        handleSessionPickerSelect(row: unknown, applyStartupModes: boolean): Promise<void>;
+      };
+      const handleUserInput = vi.spyOn(driver, 'handleUserInput').mockImplementation(() => {});
+
+      await expect(driver.init()).resolves.toBe(false);
+      // The picker defers session creation, so nothing can be submitted yet.
+      expect(driver.state.startupState).toBe('picker');
+      expect(handleUserInput).not.toHaveBeenCalled();
+
+      await driver.handleSessionPickerSelect({ id: 'ses-picked', work_dir: '/tmp/proj-a' }, true);
+
+      expect(handleUserInput).toHaveBeenCalledOnce();
+      expect(handleUserInput).toHaveBeenCalledWith('go');
+    });
+
+    it('submits nothing when the flag is absent', async () => {
+      const { driver, handleUserInput } = makeInitialPromptDriver();
+
+      await expect(driver.init()).resolves.toBe(false);
+      await driver.finishStartup(false);
+
+      expect(handleUserInput).not.toHaveBeenCalled();
+    });
+  });
 });
 
 function uiContainsFooter(driver: StartupDriver): boolean {

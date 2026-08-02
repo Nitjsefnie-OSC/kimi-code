@@ -57,7 +57,13 @@ export function createProgram(
     .addOption(
       new Option(
         '-p, --prompt <prompt>',
-        'Run one prompt non-interactively and print the response.',
+        'Run one prompt non-interactively, print the response, and exit.',
+      ),
+    )
+    .addOption(
+      new Option(
+        '--initial-prompt <prompt>',
+        'Start the interactive session and submit this text as the first message. Unlike --prompt the session stays open afterwards. Cannot be combined with --prompt.',
       ),
     )
     .addOption(
@@ -159,6 +165,7 @@ export function createProgram(
       model: raw['model'] as string | undefined,
       outputFormat: raw['outputFormat'] as CLIOptions['outputFormat'],
       prompt: raw['prompt'] as string | undefined,
+      initialPrompt: raw['initialPrompt'] as string | undefined,
       skillsDirs: raw['skillsDir'] as string[],
       agent: raw['agent'] as string | undefined,
       agentFiles: raw['agentFile'] as string[],
