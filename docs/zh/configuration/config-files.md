@@ -103,6 +103,7 @@ timeout = 5
 | `merge_all_available_skills` | `boolean` | `true` | 是否合并所有目录中的 Agent Skills |
 | `extra_skill_dirs` | `array<string>` | — | 额外 Skill 搜索目录，叠加到默认目录之上 |
 | `extra_agent_dirs` | `array<string>` | — | 额外自定义 Agent 搜索目录，叠加到默认目录之上 |
+| `extra_agentmd_files` | `array<string>` | — | 额外的 `AGENTS.md` 指令文件，在用户级文件（`~/.kimi-code/AGENTS.md`、`~/.agents/AGENTS.md`）之后、工作区文件之前加载。路径解析方式与 `extra_skill_dirs` 相同（`~`、绝对路径或相对于项目根目录）；列出的文件不存在时会被忽略 |
 | `telemetry` | `boolean` | `true` | 是否启用匿名遥测；显式设为 `false` 时关闭 |
 | `providers` | `table` | `{}` | API 供应商表 → [`providers`](#providers) |
 | `models` | `table` | — | 模型别名表 → [`models`](#models) |

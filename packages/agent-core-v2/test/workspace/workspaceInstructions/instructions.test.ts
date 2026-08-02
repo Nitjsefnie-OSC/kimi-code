@@ -18,9 +18,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DisposableStore } from '#/_base/di/lifecycle';
 import { createServices } from '#/_base/di/test';
-import { Emitter } from '#/_base/event';
+import { Emitter, Event } from '#/_base/event';
 import { ILogService } from '#/_base/log/log';
+import { EXTRA_AGENTMD_FILES_SECTION } from '#/agent/profile/configSection';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { IConfigService } from '#/app/config/config';
 import { HostFileSystem } from '#/os/backends/node-local/hostFsService';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
@@ -46,6 +48,7 @@ describe('WorkspaceInstructionsService', () => {
   let brandHomeDir: string;
   let disposables: DisposableStore;
   let watchFires: Map<string, Emitter<HostFsChange>>;
+  let extraAgentmdFiles: string[];
 
   beforeEach(() => {
     workDir = mkdtempSync(join(tmpdir(), 'kimi-instructions-work-'));
@@ -53,6 +56,7 @@ describe('WorkspaceInstructionsService', () => {
     brandHomeDir = mkdtempSync(join(tmpdir(), 'kimi-instructions-brand-'));
     disposables = new DisposableStore();
     watchFires = new Map();
+    extraAgentmdFiles = [];
   });
 
   afterEach(async () => {
@@ -102,6 +106,14 @@ describe('WorkspaceInstructionsService', () => {
         reg.definePartialInstance(IBootstrapService, { homeDir: brandHomeDir });
         reg.defineInstance(IHostFsWatchService, fsWatchStub());
         reg.defineInstance(ILogService, stubLog());
+        reg.definePartialInstance(IConfigService, {
+          ready: Promise.resolve(),
+          get: (<T,>(domain: string): T | undefined =>
+            domain === EXTRA_AGENTMD_FILES_SECTION
+              ? ([...extraAgentmdFiles] as T)
+              : undefined) as IConfigService['get'],
+          onDidSectionChange: Event.None as IConfigService['onDidSectionChange'],
+        });
         reg.define(IWorkspaceInstructionsService, WorkspaceInstructionsService);
       },
     });
@@ -198,4 +210,24 @@ describe('WorkspaceInstructionsService', () => {
 
     expect(states.get(workspaceInstructionsCurrentKey).agentsMd).toContain('updated instructions');
   });
+
+  it('loads extra_agentmd_files after the user-level slots and before workspace files', async () => {
+    await writeFile(join(brandHomeDir, 'AGENTS.md'), 'brand instructions', 'utf8');
+    await writeFile(join(workDir, 'AGENTS.md'), 'project instructions', 'utf8');
+    await writeFile(join(workDir, 'bundle-rules.md'), 'configured extra', 'utf8');
+    extraAgentmdFiles = [join(workDir, 'bundle-rules.md'), join(workDir, 'missing.md')];
+
+    const { service } = createService();
+    await service.ready;
+
+    const agentsMd = service.snapshot.agentsMd ?? '';
+    expect(agentsMd).toContain('configured extra');
+    expect(agentsMd.indexOf('brand instructions')).toBeLessThan(
+      agentsMd.indexOf('configured extra'),
+    );
+    expect(agentsMd.indexOf('configured extra')).toBeLessThan(
+      agentsMd.indexOf('project instructions'),
+    );
+  });
+
 });

@@ -109,6 +109,8 @@ export interface AgentOptions {
   readonly imageLimits?: ImageLimits;
   readonly replay?: ReplayBuilderOptions;
   readonly additionalDirs?: readonly string[];
+  /** `extra_agentmd_files` from config.toml; see `profile/context.ts`. */
+  readonly extraAgentmdFiles?: readonly string[];
   readonly systemPromptContextProvider?: (() => Promise<PreparedSystemPromptContext>) | undefined;
 }
 
@@ -174,6 +176,7 @@ export class Agent {
   printDrainAgentTasksOnStop = false;
 
   private additionalDirs: readonly string[];
+  private readonly extraAgentmdFiles: readonly string[];
   private activeProfile?: ResolvedAgentProfile;
   private brandHome?: string;
   private readonly emittedThinkingEffortWarnings = new Set<string>();
@@ -210,6 +213,7 @@ export class Agent {
     this.experimentalFlags = options.experimentalFlags ?? new FlagResolver();
     this.imageLimits = options.imageLimits ?? new ImageLimits();
     this.additionalDirs = normalizeAdditionalDirs(options.additionalDirs ?? []);
+    this.extraAgentmdFiles = options.extraAgentmdFiles ?? [];
     this.systemPromptContextProvider = options.systemPromptContextProvider;
 
     this.llmRequestLogger = new LlmRequestLogger(this.log);
@@ -477,6 +481,7 @@ export class Agent {
     const context = this.systemPromptContextProvider === undefined
       ? await prepareSystemPromptContext(this.kaos, this.brandHome, {
           additionalDirs: this.additionalDirs,
+          extraAgentmdFiles: this.extraAgentmdFiles,
         })
       : await this.systemPromptContextProvider();
     this.updateSystemPromptFromProfile(this.activeProfile, context);

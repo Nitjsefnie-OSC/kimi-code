@@ -30,6 +30,11 @@ import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { loadAgentsMdDetailed } from '#/agent/profile/context';
 import { IAgentAgentsMdReminderService } from '#/agent/agentsMdReminder/agentsMdReminder';
+import {
+  EXTRA_AGENTMD_FILES_SECTION,
+  type ExtraAgentmdFilesConfig,
+} from '#/agent/profile/configSection';
+import { IConfigService } from '#/app/config/config';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import { IAgentSystemReminderService } from '#/agent/systemReminder/systemReminder';
 import { IWireService } from '#/wire/wire';
@@ -58,6 +63,7 @@ export class SessionInitService implements ISessionInitService {
     @IHostEnvironment private readonly env: IHostEnvironment,
     @IBootstrapService private readonly bootstrap: IBootstrapService,
     @ISessionContext private readonly sessionContext: ISessionContext,
+    @IConfigService private readonly config: IConfigService,
   ) {}
 
   cancelInit(): void {
@@ -111,6 +117,10 @@ export class SessionInitService implements ISessionInitService {
         { fs: this.fs, homeDir: this.env.homeDir },
         this.sessionContext.cwd,
         this.bootstrap.homeDir,
+        {
+          extraAgentmdFiles:
+            this.config.get<ExtraAgentmdFilesConfig>(EXTRA_AGENTMD_FILES_SECTION) ?? [],
+        },
       );
       main.accessor
         .get(IAgentAgentsMdReminderService)

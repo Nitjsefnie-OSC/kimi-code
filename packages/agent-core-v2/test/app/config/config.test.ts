@@ -34,6 +34,11 @@ import {
   EXTRA_SKILL_DIRS_SECTION,
   MERGE_ALL_AVAILABLE_SKILLS_SECTION,
 } from '#/app/skillCatalog/configSection';
+import '#/agent/profile/configSection';
+import {
+  EXTRA_AGENTMD_FILES_SECTION,
+  type ExtraAgentmdFilesConfig,
+} from '#/agent/profile/configSection';
 import '#/agent/permissionMode/configSection';
 import { DEFAULT_PERMISSION_MODE_SECTION } from '#/agent/permissionMode/configSection';
 import '#/agent/media/configSection';
@@ -2256,6 +2261,39 @@ describe('ConfigService replaceSections', () => {
       acme: { type: 'openai', apiKey: 'sk-acme' },
     });
     expect(config.inspect<ThinkingConfig>(THINKING_SECTION).userValue).toEqual({ enabled: true });
+
+    disposables.dispose();
+  });
+});
+
+describe('extraAgentmdFiles config section', () => {
+  it('registers an empty default and reads the extra_agentmd_files TOML key', async () => {
+    const registry = new ConfigRegistry();
+    expect(registry.getSection(EXTRA_AGENTMD_FILES_SECTION)?.defaultValue).toEqual([]);
+
+    const disposables = new DisposableStore();
+    const ix = disposables.add(new TestInstantiationService());
+    const storage = new InMemoryStorageService();
+    await storage.write(
+      '',
+      'config.toml',
+      new TextEncoder().encode(
+        'extra_agentmd_files = ["~/.kimi-code/bundle-rules.md", "docs/rules.md"]\n',
+      ),
+    );
+    ix.stub(ILogService, stubLog());
+    ix.stub(IBootstrapService, stubBootstrap('/tmp/kimi-cfg', {}));
+    ix.stub(IFileSystemStorageService, storage);
+    ix.set(IAtomicTomlDocumentStore, new SyncDescriptor(TomlAtomicDocumentStore));
+    ix.set(IConfigRegistry, new SyncDescriptor(ConfigRegistry));
+    ix.set(IConfigService, new SyncDescriptor(ConfigService));
+    const config = ix.get(IConfigService);
+    await config.ready;
+
+    expect(config.get<ExtraAgentmdFilesConfig>(EXTRA_AGENTMD_FILES_SECTION)).toEqual([
+      '~/.kimi-code/bundle-rules.md',
+      'docs/rules.md',
+    ]);
 
     disposables.dispose();
   });

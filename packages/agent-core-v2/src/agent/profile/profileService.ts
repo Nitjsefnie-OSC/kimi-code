@@ -113,6 +113,10 @@ import { IWireService } from '#/wire/wire';
 import type { PayloadOf } from '#/wire/types';
 import { IEventBus } from '#/app/event/eventBus';
 import {
+  EXTRA_AGENTMD_FILES_SECTION,
+  type ExtraAgentmdFilesConfig,
+} from './configSection';
+import {
   extractAgentsMdPathsFromSystemPrompt,
   prepareSystemPromptContext,
   type LoadedAgentsMd,
@@ -887,6 +891,8 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       {
         additionalDirs: options?.additionalDirs ?? this.workspace.additionalDirs,
         preloadedAgentsMd,
+        extraAgentmdFiles:
+          this.config.get<ExtraAgentmdFilesConfig>(EXTRA_AGENTMD_FILES_SECTION) ?? [],
       },
     );
     const skills = await this.resolveSkillListing();

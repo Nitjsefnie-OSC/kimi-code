@@ -8,7 +8,8 @@
  * (`agentsMdWatchRoots` — brand / user-generic / project-root→leaf chain,
  * each plan root watched recursively and pruned to its candidates so files
  * created later inside not-yet-existing directories are still caught)
- * through `hostFsWatch` and reloads debounced; the change event fires only
+ * through `hostFsWatch` and reloads debounced (a change to the
+ * `extraAgentmdFiles` config section also triggers a reload); the change event fires only
  * when the combined content or warning actually changed. The snapshot is shared by every session of
  * the handler through the `ISessionInstructionsProvider` seed
  * (`sessionProvider()`), a live read view over this service. The plain-data
@@ -24,8 +25,13 @@ import { ILogService } from '#/_base/log/log';
 import { defineState } from '#/_base/state/stateRegistry';
 import { TimeoutTimer } from '#/_base/utils/timer';
 import { subtreeWatchFilter } from '#/_base/utils/paths';
+import {
+  EXTRA_AGENTMD_FILES_SECTION,
+  type ExtraAgentmdFilesConfig,
+} from '#/agent/profile/configSection';
 import { agentsMdWatchRoots, loadAgentsMdForRoots } from '#/agent/profile/context';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { IConfigService } from '#/app/config/config';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { IHostFsWatchService } from '#/os/interface/hostFsWatch';
@@ -65,11 +71,20 @@ export class WorkspaceInstructionsService
     @IHostFsWatchService private readonly fsWatch: IHostFsWatchService,
     @ILogService private readonly log: ILogService,
     @IWorkspaceStateService private readonly states: IWorkspaceStateService,
+    @IConfigService private readonly config: IConfigService,
   ) {
     super();
     this.states.register(workspaceInstructionsCurrentKey);
     this.ready = this.reload();
     void this.watchCandidateFiles();
+    this._register(
+      this.config.onDidSectionChange((event) => {
+        if (event.domain !== EXTRA_AGENTMD_FILES_SECTION) return;
+        void this.reload().catch((error) => {
+          this.log.warn(`AGENTS.md reload failed: ${String(error)}`);
+        });
+      }),
+    );
   }
 
   private get current(): WorkspaceInstructionsSnapshot {
@@ -86,10 +101,15 @@ export class WorkspaceInstructionsService
 
   reload(): Promise<void> {
     const tail = this.reloadTail.catch(() => undefined).then(async () => {
+      await this.config.ready;
       const result = await loadAgentsMdForRoots(
         { fs: this.fs, homeDir: this.env.homeDir },
         this.bootstrap.homeDir,
         [this.workspace.cwd],
+        {
+          extraAgentmdFiles:
+            this.config.get<ExtraAgentmdFilesConfig>(EXTRA_AGENTMD_FILES_SECTION) ?? [],
+        },
       );
       const next: WorkspaceInstructionsSnapshot = {
         agentsMd: result.content,

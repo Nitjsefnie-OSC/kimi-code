@@ -8,13 +8,14 @@
 # commented "# field: type" lines describe the remaining schema fields.
 # Values resolve as: default -> config.toml -> env overlay -> memory.
 
-# Index (22 sections · 3 overlay(s))
+# Index (23 sections · 3 overlay(s))
 #   background               src/agent/task/configSection.ts
 #   cron                     src/app/cron/configSection.ts
 #   defaultPermissionMode    src/agent/permissionMode/configSection.ts
 #   defaultPlanMode          src/agent/plan/configSection.ts
 #   experimental             src/app/flag/flag.ts
 #   extraAgentDirs           src/workspace/workspaceAgentProfileLoader/configSection.ts
+#   extraAgentmdFiles        src/agent/profile/configSection.ts
 #   extraSkillDirs           src/app/skillCatalog/configSection.ts
 #   hooks                    src/agent/externalHooks/configSection.ts
 #   image                    src/agent/media/configSection.ts
@@ -111,6 +112,14 @@ default_plan_mode = false
 # ##########################################################################
 
 extra_agent_dirs = []
+
+# ##########################################################################
+# extraAgentmdFiles (config.toml: extra_agentmd_files)
+#   owner: src/agent/profile/configSection.ts
+#   scope: core
+# ##########################################################################
+
+extra_agentmd_files = []
 
 # ##########################################################################
 # extraSkillDirs (config.toml: extra_skill_dirs)

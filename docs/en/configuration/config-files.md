@@ -103,6 +103,7 @@ Fields in the config file fall into two categories: **top-level scalars** that d
 | `merge_all_available_skills` | `boolean` | `true` | Whether to merge Agent Skills from all available directories |
 | `extra_skill_dirs` | `array<string>` | — | Extra skill search directories, layered on top of the default directories |
 | `extra_agent_dirs` | `array<string>` | — | Extra custom agent search directories, layered on top of the default directories |
+| `extra_agentmd_files` | `array<string>` | — | Extra `AGENTS.md`-style instruction files, loaded after the user-level files (`~/.kimi-code/AGENTS.md`, `~/.agents/AGENTS.md`) and before any workspace file. Paths resolve like `extra_skill_dirs` (`~`, absolute, or relative to the project root); a listed file that does not exist is ignored |
 | `telemetry` | `boolean` | `true` | Whether anonymous telemetry is enabled; disabled only when explicitly set to `false` |
 | `providers` | `table` | `{}` | API provider table → [`providers`](#providers) |
 | `models` | `table` | — | Model alias table → [`models`](#models) |

@@ -2,7 +2,8 @@
  * `profile` domain — system-prompt context assembly.
  *
  * Loads the AGENTS.md instruction hierarchy (user-level brand + generic files,
- * then project-level files from the project root down to the cwd — the root
+ * then any `extra_agentmd_files` configured in config.toml, then project-level
+ * files from the project root down to the cwd — the root
  * discovered through a git work-tree probe) and assembles
  * the {@link SystemPromptContext} bag.
  * `agentsMdWatchRoots` exposes the watch plan for the probed file set, and
@@ -26,7 +27,7 @@
  * rendered source annotations.
  */
 
-import { basename, dirname, join, normalize } from 'pathe';
+import { basename, dirname, isAbsolute, join, normalize, resolve } from 'pathe';
 
 import { findGitWorkTree } from '#/app/git/workTree';
 import type { IHostFileSystem } from '#/os/interface/hostFileSystem';
@@ -53,7 +54,16 @@ export interface PreparedSystemPromptContext extends SystemPromptContext {
   readonly agentsMdWarning?: string;
 }
 
-export interface PrepareSystemPromptContextOptions {
+/**
+ * Extra instruction files contributed by the `extra_agentmd_files` config key.
+ * Loaded after the user-level slots and before any workspace file; see
+ * {@link loadAgentsMdForRoots}.
+ */
+export interface LoadAgentsMdOptions {
+  readonly extraAgentmdFiles?: readonly string[];
+}
+
+export interface PrepareSystemPromptContextOptions extends LoadAgentsMdOptions {
   readonly additionalDirs?: readonly string[];
   readonly preloadedAgentsMd?: LoadedAgentsMd;
 }
@@ -69,7 +79,7 @@ export async function prepareSystemPromptContext(
     listDirectory(deps, workDir, { collapseHiddenDirs: true }),
     options?.preloadedAgentsMd !== undefined
       ? Promise.resolve(options.preloadedAgentsMd)
-      : loadAgentsMdForRoots(deps, brandHome, [workDir]),
+      : loadAgentsMdForRoots(deps, brandHome, [workDir], options),
     loadAdditionalDirsInfo(deps, additionalDirs),
   ]);
   return {
@@ -85,8 +95,9 @@ export async function loadAgentsMd(
   deps: ProfileContextDeps,
   workDir: string,
   brandHome?: string,
+  options?: LoadAgentsMdOptions,
 ): Promise<string> {
-  const result = await loadAgentsMdForRoots(deps, brandHome, [workDir]);
+  const result = await loadAgentsMdForRoots(deps, brandHome, [workDir], options);
   return result.content;
 }
 
@@ -94,8 +105,9 @@ export async function loadAgentsMdDetailed(
   deps: ProfileContextDeps,
   workDir: string,
   brandHome?: string,
+  options?: LoadAgentsMdOptions,
 ): Promise<LoadedAgentsMd> {
-  return loadAgentsMdForRoots(deps, brandHome, [workDir]);
+  return loadAgentsMdForRoots(deps, brandHome, [workDir], options);
 }
 
 export interface LoadedAgentsMd {
@@ -166,6 +178,7 @@ export async function loadAgentsMdForRoots(
   deps: ProfileContextDeps,
   brandHome: string | undefined,
   workDirs: readonly string[],
+  options?: LoadAgentsMdOptions,
 ): Promise<LoadedAgentsMd> {
   const discovered: AgentFile[] = [];
   const seen = new Set<string>();
@@ -186,6 +199,14 @@ export async function loadAgentsMdForRoots(
 
   const realHome = deps.homeDir;
   const brandDir = brandHome ?? join(realHome, '.kimi-code');
+  const roots = await Promise.all(
+    workDirs.map(async (workDir) => {
+      const rootWorkDir = normalize(workDir);
+      const projectRoot = (await findGitWorkTree(deps.fs, rootWorkDir))?.root ?? rootWorkDir;
+      return { rootWorkDir, projectRoot };
+    }),
+  );
+
   await collect(join(brandDir, 'AGENTS.md'));
 
   const genericDirs = [join(realHome, '.agents')];
@@ -196,9 +217,17 @@ export async function loadAgentsMdForRoots(
     if (await collect(file)) break;
   }
 
-  for (const workDir of workDirs) {
-    const rootWorkDir = normalize(workDir);
-    const projectRoot = (await findGitWorkTree(deps.fs, rootWorkDir))?.root ?? rootWorkDir;
+  // `extra_agentmd_files` sits AFTER the user-level slots and BEFORE any
+  // workspace file, so project instructions still override them. Relative
+  // entries resolve against the first work dir's project root, matching how
+  // `extra_skill_dirs` resolves.
+  const configuredRoot = roots[0]?.projectRoot ?? realHome;
+  for (const entry of options?.extraAgentmdFiles ?? []) {
+    if (typeof entry !== 'string' || entry.trim().length === 0) continue;
+    await collect(resolveConfiguredFile(entry.trim(), configuredRoot, realHome));
+  }
+
+  for (const { rootWorkDir, projectRoot } of roots) {
     const dirs = dirsRootToLeaf(rootWorkDir, projectRoot);
 
     for (const dir of dirs) {
@@ -275,6 +304,18 @@ export async function findProjectRoot(
 ): Promise<string> {
   const rootWorkDir = normalize(workDir);
   return (await findGitWorkTree(deps.fs, rootWorkDir))?.root ?? rootWorkDir;
+}
+
+/**
+ * Resolves one `extra_agentmd_files` entry. Mirrors `resolveConfiguredDir` in
+ * `app/skillCatalog/skillRoots.ts` so the two config keys accept the same path
+ * shapes: `~` / `~/…`, absolute, or project-root-relative.
+ */
+function resolveConfiguredFile(file: string, projectRoot: string, osHomeDir: string): string {
+  if (file === '~') return osHomeDir;
+  if (file.startsWith('~/')) return join(osHomeDir, file.slice(2));
+  if (isAbsolute(file)) return file;
+  return resolve(projectRoot, file);
 }
 
 export function dirsRootToLeaf(workDir: string, projectRoot: string): string[] {
