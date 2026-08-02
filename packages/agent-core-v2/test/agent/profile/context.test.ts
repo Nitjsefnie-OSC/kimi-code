@@ -215,6 +215,103 @@ describe('prepareSystemPromptContext AGENTS.md size warning', () => {
   });
 });
 
+describe('loadAgentsMd rules directories', () => {
+  it('loads user-level and project-level rules after AGENTS.md, in lexicographic order', async () => {
+    await writeFile(join(workDir, 'AGENTS.md'), 'project instructions', 'utf-8');
+
+    const userRules = join(homeDir, '.kimi-code', 'rules');
+    await mkdir(userRules, { recursive: true });
+    // Written in reverse order on purpose: the reader must sort, not rely on
+    // whatever order the filesystem hands back.
+    await writeFile(join(userRules, 'zz-user.md'), 'user rule zz', 'utf-8');
+    await writeFile(join(userRules, 'aa-user.md'), 'user rule aa', 'utf-8');
+
+    const projectRules = join(workDir, '.kimi-code', 'rules');
+    await mkdir(projectRules, { recursive: true });
+    await writeFile(join(projectRules, 'zz-project.md'), 'project rule zz', 'utf-8');
+    await writeFile(join(projectRules, 'aa-project.md'), 'project rule aa', 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+
+    const order = [
+      'project instructions',
+      'user rule aa',
+      'user rule zz',
+      'project rule aa',
+      'project rule zz',
+    ].map((needle) => {
+      const index = result.indexOf(needle);
+      expect(index, needle).toBeGreaterThanOrEqual(0);
+      return index;
+    });
+    expect(order).toEqual(order.toSorted((a, b) => a - b));
+  });
+
+  it('annotates each rules file with its source path', async () => {
+    const userRules = join(homeDir, '.kimi-code', 'rules');
+    await mkdir(userRules, { recursive: true });
+    await writeFile(join(userRules, 'doctrine.md'), 'annotated rule', 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+
+    expect(result).toContain(`<!-- From: ${join(userRules, 'doctrine.md')} -->`);
+    expect(result).toContain('annotated rule');
+  });
+
+  it('ignores non-markdown files and nested directories inside a rules directory', async () => {
+    const userRules = join(homeDir, '.kimi-code', 'rules');
+    await mkdir(join(userRules, 'nested.md'), { recursive: true });
+    await writeFile(join(userRules, 'notes.txt'), 'not a rule', 'utf-8');
+    await writeFile(join(userRules, 'real.md'), 'real rule', 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir }, workDir);
+
+    expect(result).toContain('real rule');
+    expect(result).not.toContain('not a rule');
+  });
+
+  it('is a silent no-op when no rules directory exists', async () => {
+    await writeFile(join(workDir, 'AGENTS.md'), 'project only', 'utf-8');
+
+    const brandHome = await mkdtemp(join(tmpdir(), 'kimi-agents-brand-'));
+    extraDirs.push(brandHome);
+    const result = await prepareSystemPromptContext({ fs, homeDir }, workDir, brandHome);
+
+    expect(result.agentsMd).toContain('project only');
+    expect(result.agentsMdWarning).toBeUndefined();
+  });
+
+  it('loads rules from the brand home when one is given', async () => {
+    const brandHome = await mkdtemp(join(tmpdir(), 'kimi-agents-brand-'));
+    extraDirs.push(brandHome);
+    await mkdir(join(brandHome, 'rules'), { recursive: true });
+    await writeFile(join(brandHome, 'rules', 'brand.md'), 'brand home rule', 'utf-8');
+    await mkdir(join(homeDir, '.kimi-code', 'rules'), { recursive: true });
+    await writeFile(join(homeDir, '.kimi-code', 'rules', 'stale.md'), 'stale rule', 'utf-8');
+
+    const result = await loadAgentsMd({ fs, homeDir }, workDir, brandHome);
+
+    expect(result).toContain('brand home rule');
+    expect(result).not.toContain('stale rule');
+  });
+});
+
+describe('prepareSystemPromptContext rules size accounting', () => {
+  it('counts rules bytes toward the instruction-size warning', async () => {
+    const brandHome = await mkdtemp(join(tmpdir(), 'kimi-agents-brand-'));
+    extraDirs.push(brandHome);
+    await writeFile(join(workDir, 'AGENTS.md'), 'small instructions', 'utf-8');
+    await mkdir(join(brandHome, 'rules'), { recursive: true });
+    await writeFile(join(brandHome, 'rules', 'huge.md'), 'x'.repeat(40 * 1024), 'utf-8');
+
+    const result = await prepareSystemPromptContext({ fs, homeDir }, workDir, brandHome);
+
+    expect(result.agentsMd).toContain('x'.repeat(40 * 1024));
+    expect(result.agentsMdWarning).toBeDefined();
+    expect(result.agentsMdWarning).toContain('exceeds the recommended');
+  });
+});
+
 describe('prepareSystemPromptContext additional directories', () => {
   it('includes additional directory listings without loading their AGENTS.md', async () => {
     const brandHome = await mkdtemp(join(tmpdir(), 'kimi-agents-empty-brand-'));
