@@ -330,6 +330,9 @@ export class KimiTUI {
   private readonly migrateOnly: boolean;
   private readonly engineV2: boolean;
   private startupNotice: string | undefined;
+  // `--initial-prompt` text, still waiting to be submitted as the first user
+  // turn. Cleared the moment it is submitted so it can never fire twice.
+  private pendingInitialPrompt: string | undefined;
   private lastActivityMode: string | undefined;
   private currentLoadingTip: { kind: LoadingTipKind; tip: string | undefined } | undefined =
     undefined;
@@ -404,6 +407,7 @@ export class KimiTUI {
     this.migrateOnly = startupInput.migrateOnly ?? false;
     this.engineV2 = startupInput.engineV2 ?? false;
     this.startupNotice = startupInput.startupNotice;
+    this.pendingInitialPrompt = startupInput.cliOptions.initialPrompt;
     this.state = createTUIState(tuiOptions);
     this.uninstallRainbowDance = installRainbowDance(() => {
       this.state.ui.requestRender();
@@ -729,6 +733,23 @@ export class KimiTUI {
     }
     void this.refreshSkillCommands(this.session);
     void this.refreshPluginCommands(this.session);
+    this.maybeSubmitInitialPrompt();
+  }
+
+  /**
+   * `--initial-prompt`: submit the startup text as the first user turn, exactly
+   * as if it had been typed into the editor and sent. Consumed once; the TUI
+   * then keeps running and the user drives the session from there — that is
+   * what separates this from `kimi -p`, which exits after its single turn.
+   */
+  private maybeSubmitInitialPrompt(): void {
+    const text = this.pendingInitialPrompt;
+    if (text === undefined) return;
+    this.pendingInitialPrompt = undefined;
+    // No session means startup never produced one (e.g. the picker was
+    // cancelled); there is nothing to submit the turn to.
+    if (this.session === undefined) return;
+    this.handleUserInput(text);
   }
 
   private async showSessionWarnings(session: Session): Promise<void> {
@@ -3069,6 +3090,9 @@ export class KimiTUI {
       this.applyStartupPermissionAndPlanToAppState();
     }
     this.hideSessionPicker();
+    // Startup picker (bare `--session`): finishStartup() returned before the
+    // session existed, so this is where a pending --initial-prompt lands.
+    if (applyStartupModes) this.maybeSubmitInitialPrompt();
   }
 
   private showApprovalPanel(payload: ApprovalPanelData): void {

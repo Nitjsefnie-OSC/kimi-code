@@ -44,6 +44,12 @@ export interface CLIOptions {
   outputFormat: PromptOutputFormat | undefined;
   quiet?: boolean;
   prompt: string | undefined;
+  /**
+   * `--initial-prompt`: text submitted as the first user turn of a normal
+   * interactive session. Unlike `prompt` (`-p`), the session stays alive after
+   * that turn, so the UI mode remains `shell`.
+   */
+  initialPrompt?: string | undefined;
   skillsDirs: string[];
   agent: string | undefined;
   agentFiles: string[];
@@ -70,6 +76,16 @@ export function validateOptions(
   const promptMode = prompt !== undefined;
   if (promptMode && prompt.trim().length === 0) {
     throw new OptionConflictError('Prompt cannot be empty.');
+  }
+  // `--initial-prompt` seeds an interactive session; `--prompt` runs one turn
+  // and exits. Asking for both is a contradiction, not a precedence question.
+  if (promptMode && opts.initialPrompt !== undefined) {
+    throw new OptionConflictError(
+      'Cannot combine --prompt with --initial-prompt: --prompt exits after one turn, --initial-prompt keeps the interactive session open.',
+    );
+  }
+  if (opts.initialPrompt !== undefined && opts.initialPrompt.trim().length === 0) {
+    throw new OptionConflictError('Initial prompt cannot be empty.');
   }
   if (opts.model !== undefined && opts.model.trim().length === 0) {
     throw new OptionConflictError('Model cannot be empty.');
