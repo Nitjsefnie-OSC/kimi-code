@@ -1,4 +1,4 @@
-import { dirname, join } from 'pathe';
+import { basename, dirname, join } from 'pathe';
 
 import type { Kaos } from '@moonshot-ai/kaos';
 
@@ -89,17 +89,39 @@ async function loadAgentsMdForRoots(
     if (await collect(file)) break;
   }
 
+  const projectDirs: string[] = [];
   for (const workDir of workDirs) {
     const rootKaos = kaos.withCwd(workDir);
     const rootWorkDir = rootKaos.getcwd();
     const projectRoot = await findProjectRoot(rootKaos, rootWorkDir);
     const dirs = dirsRootToLeaf(rootKaos, rootWorkDir, projectRoot);
+    projectDirs.push(...dirs);
 
     for (const dir of dirs) {
       await collect(join(dir, '.kimi-code', 'AGENTS.md'));
       for (const fileName of ['AGENTS.md', 'agents.md']) {
         if (await collect(join(dir, fileName))) break;
       }
+    }
+  }
+
+  // Rules directories load *after* the whole AGENTS.md hierarchy, user level
+  // before project level, lexicographically within each directory. They feed
+  // the same `discovered` list, so annotation, dedupe and the size accounting
+  // below are shared with AGENTS.md rather than duplicated. The directory
+  // probes run concurrently (a missing rules dir is the common case and costs
+  // one failed readdir); ordering comes from the listing array, not from the
+  // order the probes settle in.
+  const rulesDirs = [
+    join(brandDir, 'rules'),
+    ...projectDirs.map((dir) => join(dir, '.kimi-code', 'rules')),
+  ];
+  const rulesListings = await Promise.all(
+    rulesDirs.map(async (dirPath) => ({ dirPath, names: await listRuleFileNames(kaos, dirPath) })),
+  );
+  for (const { dirPath, names } of rulesListings) {
+    for (const name of names) {
+      await collect(join(dirPath, name));
     }
   }
 
@@ -165,6 +187,25 @@ async function readAgentFile(kaos: Kaos, path: string): Promise<AgentFile | unde
   const content = (await kaos.readText(path, { errors: 'ignore' })).trim();
   if (content.length === 0) return undefined;
   return { path, content };
+}
+
+/**
+ * Names of the `*.md` files directly inside a rules directory, sorted
+ * lexicographically. A missing or unreadable directory yields an empty list —
+ * rules directories are optional, so their absence is never an error. Entries
+ * that are not readable regular files are dropped later by `readAgentFile`.
+ */
+async function listRuleFileNames(kaos: Kaos, dirPath: string): Promise<readonly string[]> {
+  const names: string[] = [];
+  try {
+    for await (const fullPath of kaos.iterdir(dirPath)) {
+      const name = basename(fullPath);
+      if (name.toLowerCase().endsWith('.md')) names.push(name);
+    }
+  } catch {
+    return [];
+  }
+  return names.toSorted();
 }
 
 async function pathExists(kaos: Kaos, path: string): Promise<boolean> {

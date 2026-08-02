@@ -3,7 +3,9 @@
  *
  * Loads the AGENTS.md instruction hierarchy (user-level brand + generic files,
  * then project-level files from the project root down to the cwd — the root
- * discovered through a git work-tree probe) and assembles
+ * discovered through a git work-tree probe), then the optional rules
+ * directories (`<brandDir>/rules/*.md`, `<dir>/.kimi-code/rules/*.md`) whose
+ * files always sort after the AGENTS.md hierarchy, and assembles
  * the {@link SystemPromptContext} bag.
  * `agentsMdWatchRoots` exposes the watch plan for the probed file set, and
  * `prepareSystemPromptContext` accepts a `preloadedAgentsMd` snapshot so the
@@ -196,16 +198,38 @@ export async function loadAgentsMdForRoots(
     if (await collect(file)) break;
   }
 
+  const projectDirs: string[] = [];
   for (const workDir of workDirs) {
     const rootWorkDir = normalize(workDir);
     const projectRoot = (await findGitWorkTree(deps.fs, rootWorkDir))?.root ?? rootWorkDir;
     const dirs = dirsRootToLeaf(rootWorkDir, projectRoot);
+    projectDirs.push(...dirs);
 
     for (const dir of dirs) {
       await collect(dotKimiAgentsMdPath(dir));
       for (const fileName of AGENTS_MD_PLAIN_NAMES) {
         if (await collect(join(dir, fileName))) break;
       }
+    }
+  }
+
+  // Rules directories load *after* the whole AGENTS.md hierarchy, user level
+  // before project level, lexicographically within each directory. They feed
+  // the same `discovered` list, so annotation, dedupe and the size accounting
+  // below are shared with AGENTS.md rather than duplicated. The directory
+  // probes run concurrently (a missing rules dir is the common case and costs
+  // one failed readdir); ordering comes from the listing array, not from the
+  // order the probes settle in.
+  const rulesDirs = [
+    join(brandDir, 'rules'),
+    ...projectDirs.map((dir) => join(dir, '.kimi-code', 'rules')),
+  ];
+  const rulesListings = await Promise.all(
+    rulesDirs.map(async (dirPath) => ({ dirPath, names: await listRuleFileNames(deps, dirPath) })),
+  );
+  for (const { dirPath, names } of rulesListings) {
+    for (const name of names) {
+      await collect(join(dirPath, name));
     }
   }
 
@@ -317,6 +341,26 @@ async function readAgentFile(
   }
   if (content.length === 0) return undefined;
   return { path, content };
+}
+
+/**
+ * Names of the `*.md` files directly inside a rules directory, sorted
+ * lexicographically. A missing or unreadable directory yields an empty list —
+ * rules directories are optional, so their absence is never an error.
+ */
+async function listRuleFileNames(
+  deps: ProfileContextDeps,
+  dirPath: string,
+): Promise<readonly string[]> {
+  try {
+    const entries = await deps.fs.readdir(dirPath);
+    return entries
+      .filter((entry) => !entry.isDirectory && entry.name.toLowerCase().endsWith('.md'))
+      .map((entry) => entry.name)
+      .toSorted();
+  } catch {
+    return [];
+  }
 }
 
 async function pathExists(deps: { readonly fs: IHostFileSystem }, path: string): Promise<boolean> {
