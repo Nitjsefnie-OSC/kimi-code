@@ -864,6 +864,55 @@ describe('Session secondary-model live config', () => {
   });
 });
 
+
+describe('Session extra_agentmd_files', () => {
+  it('injects the configured files into the system-prompt AGENTS.md, before workspace files', async () => {
+    const workDir = await makeTempDir();
+    const sessionDir = await makeTempDir();
+    await mkdir(join(workDir, '.git'));
+    await writeFile(join(workDir, 'AGENTS.md'), 'project instructions', 'utf-8');
+    await writeFile(join(workDir, 'bundle-rules.md'), 'configured bundle rules', 'utf-8');
+
+    const capturedContext: { agentsMd?: string } = {};
+    const session = new Session({
+      id: 'test-extra-agentmd-files',
+      kaos: testKaos.withCwd(workDir),
+      homedir: sessionDir,
+      rpc: createSessionRpc([]),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+      providerManager: testProviderManager(),
+      config: {
+        providers: {},
+        extraAgentmdFiles: [join(workDir, 'bundle-rules.md'), join(workDir, 'missing.md')],
+      } as KimiConfig,
+    });
+    try {
+      await session.createAgent(
+        { type: 'main' },
+        {
+          profile: {
+            name: 'capture',
+            systemPrompt: (ctx) => {
+              capturedContext.agentsMd = ctx.agentsMd;
+              return '<system-prompt>';
+            },
+            tools: [],
+          },
+        },
+      );
+
+      const agentsMd = capturedContext.agentsMd ?? '';
+      expect(agentsMd).toContain('configured bundle rules');
+      expect(agentsMd).toContain('project instructions');
+      expect(agentsMd.indexOf('configured bundle rules')).toBeLessThan(
+        agentsMd.indexOf('project instructions'),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+});
+
 async function makeTempDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'kimi-core-init-'));
   tempDirs.push(dir);

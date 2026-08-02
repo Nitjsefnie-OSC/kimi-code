@@ -352,6 +352,18 @@ export const KimiConfigSchema = z.object({
   mergeAllAvailableSkills: z.boolean().optional(),
   extraSkillDirs: z.array(z.string()).optional(),
   extraAgentDirs: z.array(z.string()).optional(),
+  /**
+   * `extra_agentmd_files` — additional AGENTS.md-style instruction files loaded
+   * alongside the built-in slots. Load order: AFTER the user-level slots
+   * (`<brand home>/AGENTS.md`, then `~/.agents/AGENTS.md` / `agents.md`) and
+   * BEFORE any workspace file (`<dir>/.kimi-code/AGENTS.md`, `<dir>/AGENTS.md`),
+   * so project instructions still have the last word. Entries resolve exactly
+   * like `extra_skill_dirs`: `~` / `~/…` against the OS home dir, absolute
+   * paths as given, everything else against the project root. A listed file
+   * that does not exist is a silent no-op; loaded content counts toward the
+   * combined AGENTS.md size warning.
+   */
+  extraAgentmdFiles: z.array(z.string()).optional(),
   loopControl: LoopControlSchema.optional(),
   background: BackgroundConfigSchema.optional(),
   subagent: SubagentConfigSchema.optional(),
@@ -401,6 +413,8 @@ export const KimiConfigPatchSchema = z
     mergeAllAvailableSkills: z.boolean().optional(),
     extraSkillDirs: z.array(z.string()).optional(),
     extraAgentDirs: z.array(z.string()).optional(),
+    /** See {@link KimiConfigSchema}'s `extraAgentmdFiles`. */
+    extraAgentmdFiles: z.array(z.string()).optional(),
     loopControl: LoopControlPatchSchema.optional(),
     background: BackgroundConfigPatchSchema.optional(),
     subagent: SubagentConfigPatchSchema.optional(),

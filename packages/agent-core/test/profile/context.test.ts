@@ -202,3 +202,92 @@ describe('prepareSystemPromptContext additional directories', () => {
     expect(agentsMd).not.toContain('extra B instructions');
   });
 });
+
+describe('loadAgentsMd extra_agentmd_files', () => {
+  it('loads a configured absolute file', async () => {
+    const extraFile = join(workDir, 'bundle-rules.md');
+    await writeFile(extraFile, 'bundle rules', 'utf-8');
+
+    const result = await loadAgentsMd(testKaos, undefined, { extraAgentmdFiles: [extraFile] });
+
+    expect(result).toContain('bundle rules');
+  });
+
+  it('resolves ~ against the OS home dir', async () => {
+    await mkdir(join(homeDir, '.kimi-code'), { recursive: true });
+    await writeFile(join(homeDir, '.kimi-code', 'bundle-rules.md'), 'tilde rules', 'utf-8');
+
+    const result = await loadAgentsMd(testKaos, undefined, {
+      extraAgentmdFiles: ['~/.kimi-code/bundle-rules.md'],
+    });
+
+    expect(result).toContain('tilde rules');
+  });
+
+  it('resolves a relative path against the project root', async () => {
+    await mkdir(join(workDir, 'docs'), { recursive: true });
+    await writeFile(join(workDir, 'docs', 'rules.md'), 'relative rules', 'utf-8');
+
+    const result = await loadAgentsMd(testKaos, undefined, {
+      extraAgentmdFiles: ['docs/rules.md'],
+    });
+
+    expect(result).toContain('relative rules');
+  });
+
+  it('treats a listed file that does not exist as a silent no-op', async () => {
+    await writeFile(join(workDir, 'AGENTS.md'), 'project instructions', 'utf-8');
+
+    const result = await loadAgentsMd(testKaos, undefined, {
+      extraAgentmdFiles: [join(workDir, 'nope.md'), '~/also-missing.md'],
+    });
+
+    expect(result).toContain('project instructions');
+    expect(result).not.toContain('nope.md');
+  });
+
+  it('loads after the user-level slots and before workspace files', async () => {
+    await mkdir(join(homeDir, '.kimi-code'), { recursive: true });
+    await writeFile(join(homeDir, '.kimi-code', 'AGENTS.md'), 'user branded', 'utf-8');
+    await mkdir(join(homeDir, '.agents'), { recursive: true });
+    await writeFile(join(homeDir, '.agents', 'AGENTS.md'), 'user generic', 'utf-8');
+    await writeFile(join(workDir, 'AGENTS.md'), 'project instructions', 'utf-8');
+    const extraFile = join(workDir, 'bundle-rules.md');
+    await writeFile(extraFile, 'configured extra', 'utf-8');
+
+    const result = await loadAgentsMd(testKaos, undefined, { extraAgentmdFiles: [extraFile] });
+
+    expect(result.indexOf('user branded')).toBeLessThan(result.indexOf('configured extra'));
+    expect(result.indexOf('user generic')).toBeLessThan(result.indexOf('configured extra'));
+    expect(result.indexOf('configured extra')).toBeLessThan(
+      result.indexOf('project instructions'),
+    );
+  });
+
+  it('does not load the same file twice when it is also a built-in slot', async () => {
+    await mkdir(join(homeDir, '.kimi-code'), { recursive: true });
+    const slot = join(homeDir, '.kimi-code', 'AGENTS.md');
+    await writeFile(slot, 'shared instructions', 'utf-8');
+
+    const result = await loadAgentsMd(testKaos, undefined, { extraAgentmdFiles: [slot] });
+
+    expect(result.split('shared instructions').length - 1).toBe(1);
+  });
+
+  it('counts extra files toward the combined size warning', async () => {
+    const brandHome = await mkdtemp(join(tmpdir(), 'kimi-agents-brand-'));
+    extraDirs.push(brandHome);
+    const largeContent = 'x'.repeat(40 * 1024);
+    const extraFile = join(workDir, 'huge-rules.md');
+    await writeFile(extraFile, largeContent, 'utf-8');
+
+    const withExtra = await prepareSystemPromptContext(testKaos, brandHome, {
+      extraAgentmdFiles: [extraFile],
+    });
+    const withoutExtra = await prepareSystemPromptContext(testKaos, brandHome);
+
+    expect(withExtra.agentsMd).toContain(largeContent);
+    expect(withExtra.agentsMdWarning).toContain('exceeds the recommended');
+    expect(withoutExtra.agentsMdWarning).toBeUndefined();
+  });
+});

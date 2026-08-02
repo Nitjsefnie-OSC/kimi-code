@@ -547,6 +547,8 @@ import '#/agent/permissionRules/configSection';
 export * from '#/agent/permissionRules/permissionRules';
 export * from '#/agent/permissionRules/matchesRule';
 export * from '#/agent/permissionRules/permissionRulesService';
+import '#/agent/profile/configSection';
+export * from '#/agent/profile/configSection';
 export * from '#/agent/profile/profile';
 export * from '#/agent/profile/profileService';
 export * from '#/agent/profile/context';

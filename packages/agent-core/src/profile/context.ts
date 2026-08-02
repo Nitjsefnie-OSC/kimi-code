@@ -1,4 +1,4 @@
-import { dirname, join } from 'pathe';
+import { dirname, isAbsolute, join, resolve } from 'pathe';
 
 import type { Kaos } from '@moonshot-ai/kaos';
 
@@ -22,7 +22,16 @@ export interface PreparedSystemPromptContext
   readonly agentsMdWarning?: string;
 }
 
-export interface PrepareSystemPromptContextOptions {
+/**
+ * Extra instruction files contributed by the `extra_agentmd_files` config key.
+ * Loaded after the user-level slots and before any workspace file; see
+ * {@link loadAgentsMdForRoots}.
+ */
+export interface LoadAgentsMdOptions {
+  readonly extraAgentmdFiles?: readonly string[];
+}
+
+export interface PrepareSystemPromptContextOptions extends LoadAgentsMdOptions {
   readonly additionalDirs?: readonly string[];
 }
 
@@ -34,7 +43,7 @@ export async function prepareSystemPromptContext(
   const additionalDirs = normalizeAdditionalDirs(options?.additionalDirs ?? []);
   const [cwdListing, agentsMdResult, additionalDirsInfo] = await Promise.all([
     listDirectory(kaos, undefined, { collapseHiddenDirs: true }),
-    loadAgentsMdForRoots(kaos, brandHome, [kaos.getcwd()]),
+    loadAgentsMdForRoots(kaos, brandHome, [kaos.getcwd()], options),
     loadAdditionalDirsInfo(kaos, additionalDirs),
   ]);
   return {
@@ -45,8 +54,12 @@ export async function prepareSystemPromptContext(
   };
 }
 
-export async function loadAgentsMd(kaos: Kaos, brandHome?: string): Promise<string> {
-  const result = await loadAgentsMdForRoots(kaos, brandHome, [kaos.getcwd()]);
+export async function loadAgentsMd(
+  kaos: Kaos,
+  brandHome?: string,
+  options?: LoadAgentsMdOptions,
+): Promise<string> {
+  const result = await loadAgentsMdForRoots(kaos, brandHome, [kaos.getcwd()], options);
   return result.content;
 }
 
@@ -55,10 +68,11 @@ interface LoadedAgentsMd {
   readonly warning: string | undefined;
 }
 
-async function loadAgentsMdForRoots(
+export async function loadAgentsMdForRoots(
   kaos: Kaos,
   brandHome: string | undefined,
   workDirs: readonly string[],
+  options?: LoadAgentsMdOptions,
 ): Promise<LoadedAgentsMd> {
   const discovered: AgentFile[] = [];
   const seen = new Set<string>();
@@ -78,6 +92,14 @@ async function loadAgentsMdForRoots(
   // .agents dir stays under the real OS home so it can be shared across tools.
   const realHome = kaos.gethome();
   const brandDir = brandHome ?? join(realHome, '.kimi-code');
+  const roots = await Promise.all(
+    workDirs.map(async (workDir) => {
+      const rootKaos = kaos.withCwd(workDir);
+      const rootWorkDir = rootKaos.getcwd();
+      return { rootKaos, rootWorkDir, projectRoot: await findProjectRoot(rootKaos, rootWorkDir) };
+    }),
+  );
+
   await collect(join(brandDir, 'AGENTS.md'));
 
   // Generic user-level dir (.agents) matches skill discovery.
@@ -89,10 +111,17 @@ async function loadAgentsMdForRoots(
     if (await collect(file)) break;
   }
 
-  for (const workDir of workDirs) {
-    const rootKaos = kaos.withCwd(workDir);
-    const rootWorkDir = rootKaos.getcwd();
-    const projectRoot = await findProjectRoot(rootKaos, rootWorkDir);
+  // `extra_agentmd_files` sits AFTER the user-level slots and BEFORE any
+  // workspace file, so project instructions still override them. Relative
+  // entries resolve against the first work dir's project root, matching how
+  // `extra_skill_dirs` resolves.
+  const configuredRoot = roots[0]?.projectRoot ?? realHome;
+  for (const entry of options?.extraAgentmdFiles ?? []) {
+    if (typeof entry !== 'string' || entry.trim().length === 0) continue;
+    await collect(resolveConfiguredFile(entry.trim(), configuredRoot, realHome));
+  }
+
+  for (const { rootKaos, rootWorkDir, projectRoot } of roots) {
     const dirs = dirsRootToLeaf(rootKaos, rootWorkDir, projectRoot);
 
     for (const dir of dirs) {
@@ -138,6 +167,19 @@ async function findProjectRoot(kaos: Kaos, workDir: string): Promise<string> {
     if (parent === current) return initial;
     current = parent;
   }
+}
+
+/**
+ * Resolves one `extra_agentmd_files` entry. Mirrors `resolveConfiguredDir` in
+ * agent-core-v2's `skillRoots.ts` (the `extra_skill_dirs` precedent) so the two
+ * config keys accept the same path shapes: `~` / `~/…`, absolute, or
+ * project-root-relative.
+ */
+function resolveConfiguredFile(file: string, projectRoot: string, osHomeDir: string): string {
+  if (file === '~') return osHomeDir;
+  if (file.startsWith('~/')) return join(osHomeDir, file.slice(2));
+  if (isAbsolute(file)) return file;
+  return resolve(projectRoot, file);
 }
 
 function dirsRootToLeaf(kaos: Kaos, workDir: string, projectRoot: string): string[] {

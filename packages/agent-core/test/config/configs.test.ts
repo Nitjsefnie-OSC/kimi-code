@@ -1073,3 +1073,33 @@ describe('migrateThinkingEffortMaxToHigh', () => {
     await expect(readFile(join(home, 'migrations-effort.json'), 'utf-8')).rejects.toThrow();
   });
 });
+
+describe('extra_agentmd_files', () => {
+  it('parses the top-level key into extraAgentmdFiles', () => {
+    const config = parseConfigString(
+      'extra_agentmd_files = ["~/.kimi-code/bundle-rules.md", "docs/rules.md"]\n',
+      'config.toml',
+    );
+
+    expect(config.extraAgentmdFiles).toEqual(['~/.kimi-code/bundle-rules.md', 'docs/rules.md']);
+  });
+
+  it('round-trips back to the snake_case TOML key', async () => {
+    const dir = makeTempDir();
+    const configPath = join(dir, 'config.toml');
+    await writeConfigFile(configPath, {
+      ...validateConfig({ providers: {} }),
+      extraAgentmdFiles: ['~/.kimi-code/bundle-rules.md'],
+    });
+
+    const text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('extra_agentmd_files = [ "~/.kimi-code/bundle-rules.md" ]');
+    expect(readConfigFile(configPath).extraAgentmdFiles).toEqual([
+      '~/.kimi-code/bundle-rules.md',
+    ]);
+  });
+
+  it('is absent when the key is not configured', () => {
+    expect(parseConfigString('', 'config.toml').extraAgentmdFiles).toBeUndefined();
+  });
+});

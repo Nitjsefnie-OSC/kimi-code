@@ -494,6 +494,7 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
     'mergeAllAvailableSkills',
     'extraSkillDirs',
     'extraAgentDirs',
+    'extraAgentmdFiles',
     'telemetry',
   ];
   for (const key of scalarFields) {

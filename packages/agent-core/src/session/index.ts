@@ -256,6 +256,16 @@ export class Session {
     return this.runtimeConfig;
   }
 
+  /**
+   * `extra_agentmd_files` from the live config snapshot — additional AGENTS.md
+   * instruction files, loaded after the user-level slots and before any
+   * workspace file (see `profile/context.ts`). Read per call so a mid-session
+   * config reload is picked up by the next system-prompt refresh.
+   */
+  get extraAgentmdFiles(): readonly string[] {
+    return this.runtimeConfig?.extraAgentmdFiles ?? [];
+  }
+
   constructor(public readonly options: SessionOptions) {
     this.runtimeConfig = options.config;
     // Attach the per-session log sink up front so the constructor's
@@ -775,7 +785,7 @@ export class Session {
     const context = await prepareSystemPromptContext(
       this.systemContextKaos(agent.kaos.getcwd()),
       this.options.kimiHomeDir,
-      { additionalDirs: this.additionalDirs },
+      { additionalDirs: this.additionalDirs, extraAgentmdFiles: this.extraAgentmdFiles },
     );
     const subagentNames = Object.keys(this.agentCatalog.delegatableSubagents(profile.name));
     agent.useProfile(profile, context, this.options.kimiHomeDir, subagentNames);
@@ -914,7 +924,7 @@ export class Session {
       const context = await prepareSystemPromptContext(
         this.systemContextKaos(this.toolKaos.getcwd()),
         this.options.kimiHomeDir,
-        { additionalDirs: this.additionalDirs },
+        { additionalDirs: this.additionalDirs, extraAgentmdFiles: this.extraAgentmdFiles },
       );
       this.agentsMdWarning = context.agentsMdWarning;
     } catch (error) {
@@ -938,7 +948,9 @@ export class Session {
       });
       await handle.completion;
 
-      const agentsMd = await loadAgentsMd(mainAgent.kaos, this.options.kimiHomeDir);
+      const agentsMd = await loadAgentsMd(mainAgent.kaos, this.options.kimiHomeDir, {
+        extraAgentmdFiles: this.extraAgentmdFiles,
+      });
       mainAgent.context.appendSystemReminder(initCompletionReminder(agentsMd), {
         kind: 'injection',
         variant: 'init',
@@ -1209,11 +1221,15 @@ export class Session {
       experimentalFlags: this.experimentalFlags,
       imageLimits: this.imageLimits,
       additionalDirs: parentAgent?.getAdditionalDirs() ?? this.additionalDirs,
+      extraAgentmdFiles: this.extraAgentmdFiles,
       systemPromptContextProvider: () =>
         prepareSystemPromptContext(
           this.systemContextKaos(agent.kaos.getcwd()),
           this.options.kimiHomeDir,
-          { additionalDirs: agent.getAdditionalDirs() },
+          {
+            additionalDirs: agent.getAdditionalDirs(),
+            extraAgentmdFiles: this.extraAgentmdFiles,
+          },
         ),
     });
     return agent;
