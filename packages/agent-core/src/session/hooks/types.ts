@@ -67,6 +67,18 @@ export type HookResolvedCallback = (
 export interface HookEngineOptions {
   readonly cwd?: string;
   readonly sessionId?: string;
+  /**
+   * Id of the agent this engine fires hooks for. Emitted as `agent_id`;
+   * omitted from the payload when unknown.
+   */
+  readonly agentId?: string;
+  /**
+   * Absolute path of that agent's wire transcript (`.../agents/<id>/wire.jsonl`).
+   * Emitted as `transcript_path` so a hook can read the transcript without
+   * reconstructing the session layout. Omitted from the payload when unknown —
+   * a hook can handle an absent path, but not a wrong one.
+   */
+  readonly transcriptPath?: string;
   readonly onTriggered?: HookTriggeredCallback;
   readonly onResolved?: HookResolvedCallback;
 }

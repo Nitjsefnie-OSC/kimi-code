@@ -59,6 +59,64 @@ describe('Session lifecycle hooks', () => {
     ]);
   });
 
+  it('tells hooks where the firing agent writes its wire transcript', async () => {
+    const { command, logPath, sessionDir, workDir } = await hookFixture();
+    const session = new Session({
+      kaos: testKaos.withCwd(workDir),
+      id: 'session-transcript-path',
+      homedir: sessionDir,
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+      hooks: [
+        { event: 'SessionStart', matcher: 'startup', command, timeout: 5 },
+        { event: 'Stop', command, timeout: 5 },
+      ],
+    });
+
+    const main = await session.createMain();
+    const { id: childId, agent: child } = await session.createAgent(
+      { type: 'sub' },
+      { parentAgentId: 'main' },
+    );
+    // A subagent's hooks fire on its own engine view, so its payloads must
+    // point at its own journal rather than the main agent's.
+    await child.hooks!.trigger('Stop', { inputData: { stopHookActive: false } });
+    // Give the subagent a record of its own: its journal file is created on
+    // first write, so without one there is nothing to compare the advertised
+    // path against.
+    child.records.logRecord({
+      type: 'turn.prompt',
+      input: [{ type: 'text', text: 'hello' }],
+      origin: { kind: 'user' },
+    });
+    await child.records.flush();
+    await session.close();
+
+    const mainTranscript = join(sessionDir, 'agents', 'main', 'wire.jsonl');
+    const childTranscript = join(sessionDir, 'agents', childId, 'wire.jsonl');
+    expect(await readHookPayloads(logPath)).toMatchObject([
+      {
+        hook_event_name: 'SessionStart',
+        session_id: 'session-transcript-path',
+        agent_id: 'main',
+        transcript_path: mainTranscript,
+      },
+      {
+        hook_event_name: 'Stop',
+        session_id: 'session-transcript-path',
+        agent_id: childId,
+        transcript_path: childTranscript,
+        stop_hook_active: false,
+      },
+    ]);
+    // The paths must be the files the engine really records into, not a
+    // plausible-looking reconstruction of the session layout.
+    expect(await readFile(mainTranscript, 'utf-8')).not.toBe('');
+    expect(await readFile(childTranscript, 'utf-8')).not.toBe('');
+    expect(main.homedir).toBe(join(sessionDir, 'agents', 'main'));
+    expect(child.homedir).toBe(join(sessionDir, 'agents', childId));
+  });
+
   it('fires SessionStart with resume source after loading metadata', async () => {
     const { command, logPath, sessionDir, workDir } = await hookFixture();
     await writeFile(

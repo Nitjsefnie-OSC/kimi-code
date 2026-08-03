@@ -15,7 +15,7 @@ export class HookEngine {
   private readonly pendingTriggers = new Set<Promise<HookResult[]>>();
 
   constructor(
-    hooks: readonly HookDef[] = [],
+    private readonly hooks: readonly HookDef[] = [],
     private readonly options: HookEngineOptions = {},
   ) {
     for (const hook of hooks) {
@@ -31,6 +31,18 @@ export class HookEngine {
       result[event] = hooks.length;
     }
     return result;
+  }
+
+  /**
+   * A view of this engine bound to one agent: the same hooks and callbacks,
+   * but every payload it sends carries that agent's id and wire transcript
+   * path instead of the session-level (main agent) ones.
+   */
+  forAgent(binding: {
+    readonly agentId: string;
+    readonly transcriptPath?: string;
+  }): HookEngine {
+    return new HookEngine(this.hooks, { ...this.options, ...binding });
   }
 
   trigger(event: string, args: HookEngineTriggerArgs = {}): Promise<HookResult[]> {
@@ -74,6 +86,10 @@ export class HookEngine {
       hookEventName: event,
       sessionId: this.options.sessionId ?? '',
       cwd: this.options.cwd ?? '',
+      // `undefined` drops out of the JSON written to the hook's stdin, so an
+      // unknown agent/transcript is an absent key rather than a wrong value.
+      agentId: this.options.agentId,
+      transcriptPath: this.options.transcriptPath,
       ...args.inputData,
     });
     const matched = this.matchingHooks(event, matcherValue);

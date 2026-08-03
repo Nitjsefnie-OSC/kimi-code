@@ -31,6 +31,7 @@ import { IAgentExternalHooksService } from '#/agent/externalHooks/externalHooks'
 import { AgentExternalHooksService } from '#/agent/externalHooks/externalHooksService';
 import { IAgentFullCompactionService } from '#/agent/fullCompaction/fullCompaction';
 import { IAgentLoopService, type AfterStepContext } from '#/agent/loop/loop';
+import { IAgentScopeContext, makeAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentPermissionGate } from '#/agent/permissionGate/permissionGate';
 import { IAgentPromptService } from '#/agent/prompt/prompt';
 import { IAgentSystemReminderService } from '#/agent/systemReminder/systemReminder';
@@ -53,12 +54,18 @@ import {
 } from '#/session/sessionLifecycleHooks/sessionLifecycleHooks';
 import { createHooks, type Hooks } from '#/hooks';
 import { IAgentLifecycleService, MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
-import { ISessionContext } from '#/session/sessionContext/sessionContext';
+import { ISessionContext, makeSessionContext } from '#/session/sessionContext/sessionContext';
 import {
   type AgentTaskHooks,
   type AgentTaskStopHookContext,
   ISessionSubagentService,
 } from '#/session/subagent/subagent';
+import { AGENT_WIRE_RECORD_KEY } from '#/wire/record';
+import {
+  agentScopeOf,
+  sessionDirOf,
+  sessionScopeOf,
+} from '#/workspace/sessionLifecycle/internal/addressing';
 import { ISessionExternalHooksService } from '#/session/externalHooks/externalHooks';
 import { SessionExternalHooksService } from '#/session/externalHooks/externalHooksService';
 import {
@@ -71,7 +78,7 @@ import { IWireService } from '#/wire/wire';
 import { stubBootstrap } from '../bootstrap/stubs';
 import { stubLoopWithHooks, stubToolExecutor } from '../../agent/loop/stubs';
 import { registerStateServices } from '../../state/stubs';
-import { registerTestAgentWireServices } from '../../wire/stubs';
+import { registerTestAgentWireServices, stubAgentScopeContext } from '../../wire/stubs';
 
 function nodeCommand(source: string): string {
   return `node -e ${JSON.stringify(source.replaceAll(/\s*\n\s*/g, ' '))}`;
@@ -228,6 +235,50 @@ function stubSessionContext(): ISessionContext {
         ? 'sessions/workspace-1/session-1'
         : `sessions/workspace-1/session-1/${subKey}`,
   };
+}
+
+const TEST_HOME_DIR = '/tmp/kimi-home';
+const TEST_HANDLER_SCOPE = 'sessions/wd_project_abc123';
+const TEST_SESSION_ID = 'session-1';
+const TEST_SESSION_SCOPE = sessionScopeOf(TEST_HANDLER_SCOPE, TEST_SESSION_ID);
+
+/**
+ * A session context addressed exactly the way `sessionLifecycle` addresses a
+ * real one, so `sessionDir` is the directory the engine actually persists into
+ * rather than an arbitrary stub path.
+ */
+function addressedSessionContext(): ISessionContext {
+  return makeSessionContext({
+    sessionId: TEST_SESSION_ID,
+    workspaceId: 'workspace-1',
+    sessionDir: sessionDirOf(TEST_HOME_DIR, TEST_HANDLER_SCOPE, TEST_SESSION_ID),
+    sessionScope: TEST_SESSION_SCOPE,
+    cwd: '/tmp',
+  });
+}
+
+/**
+ * Where an agent's wire journal really lands: `FileStorageService` writes
+ * `<baseDir>/<scope>/<key>`, and its `baseDir` is seeded from
+ * `bootstrap.homeDir`. Composed from the production addressing helpers so the
+ * expectation cannot drift from the layout while still agreeing with the hook.
+ */
+function wireRecordPath(agentId: string): string {
+  return join(TEST_HOME_DIR, agentScopeOf(TEST_SESSION_SCOPE, agentId), AGENT_WIRE_RECORD_KEY);
+}
+
+function transcriptPathLogCommand(path: string): string {
+  return stdinScript([
+    'const fs = require("node:fs");',
+    'fs.appendFileSync(',
+    `  ${JSON.stringify(path)},`,
+    '  JSON.stringify({',
+    '    event: parsed.hook_event_name,',
+    '    agentId: parsed.agent_id,',
+    '    transcriptPath: parsed.transcript_path,',
+    '  }) + "\\n",',
+    ');',
+  ].join('\n'));
 }
 
 function stubSessionLifecycleHooks(): Hooks<SessionLifecycleHookSlots> {
@@ -479,7 +530,7 @@ describe('IExternalHooksRunnerService integration', () => {
       const second = makeAfterStep(signal);
       await loop.hooks.onDidFinishStep.run(second);
       expect(loop.hasPendingRequests()).toBe(false);
-      expect(stopInputs).toEqual([{ stopHookActive: false }]);
+      expect(stopInputs).toMatchObject([{ stopHookActive: false }]);
 
       eventBus.publish({
         type: 'turn.ended',
@@ -499,7 +550,7 @@ describe('IExternalHooksRunnerService integration', () => {
         }),
       );
       expect(loop.drainNextBatch(context)).toBeDefined();
-      expect(stopInputs).toEqual([{ stopHookActive: false }, { stopHookActive: false }]);
+      expect(stopInputs).toMatchObject([{ stopHookActive: false }, { stopHookActive: false }]);
     } finally {
       ix?.dispose();
       disposables.dispose();
@@ -581,7 +632,7 @@ describe('IExternalHooksRunnerService integration', () => {
       });
       await flushMicrotasks();
 
-      expect(fired).toEqual([
+      expect(fired).toMatchObject([
         {
           event: 'PermissionRequest',
           matcherValue: 'Bash',
@@ -731,6 +782,7 @@ describe('IExternalHooksRunnerService integration', () => {
           registerStateServices(reg);
           reg.defineInstance(IBootstrapService, stubBootstrap());
           reg.defineInstance(ISessionContext, stubSessionContext());
+          reg.defineInstance(IAgentScopeContext, stubAgentScopeContext('wire/external-hooks'));
           reg.defineInstance(ISessionMetadata, stubSessionMetadata());
           reg.definePartialInstance(IConfigService, {
             ready,
@@ -1326,6 +1378,131 @@ describe('IExternalHooksRunnerService integration', () => {
     }
   });
 
+  it('tells session-scope hooks where the main agent writes its wire transcript', async () => {
+    const disposables = new DisposableStore();
+    let ix: TestInstantiationService | undefined;
+    try {
+      const lifecycleHooks = stubSessionLifecycleHooks();
+      const path = hookLogPath();
+      const command = transcriptPathLogCommand(path);
+
+      ix = createServices(disposables, {
+        strict: true,
+        additionalServices: (reg) => {
+          registerStateServices(reg);
+          reg.defineInstance(ISessionContext, addressedSessionContext());
+          reg.defineInstance(ISessionLifecycleHooks, lifecycleHooks);
+          reg.defineInstance(ISessionMetadata, stubSessionMetadata());
+          reg.defineInstance(ISessionAgentProfileCatalog, stubProfileCatalog('coder'));
+          reg.defineInstance(IModelService, stubModelService('kimi-k2'));
+          reg.defineInstance(IAgentLifecycleService, stubAgentLifecycle());
+          reg.definePartialInstance(ISessionSubagentService, {
+            hooks: createHooks<AgentTaskHooks, keyof AgentTaskHooks>(['onWillStartAgentTask']),
+            onDidStopAgentTask: Event.None as Event<AgentTaskStopHookContext>,
+          });
+          reg.definePartialInstance(IConfigService, {
+            ready: Promise.resolve(),
+            get: <T = unknown>(domain: string): T =>
+              (domain === HOOKS_SECTION
+                ? [
+                  { event: 'SessionStart' as const, command, timeout: 5 },
+                  { event: 'SessionEnd' as const, command, timeout: 5 },
+                ]
+                : undefined) as T,
+          });
+          reg.definePartialInstance(IPluginService, {
+            enabledHooks: async () => [],
+            onDidReload: Event.None as IPluginService['onDidReload'],
+          });
+          reg.defineInstance(IBootstrapService, stubBootstrap(TEST_HOME_DIR));
+          reg.define(IHostProcessService, HostProcessService);
+        },
+      });
+      ix.set(IExternalHooksRunnerService, new SyncDescriptor(ExternalHooksRunnerService));
+      ix.set(ISessionExternalHooksService, new SyncDescriptor(SessionExternalHooksService));
+      ix.get(ISessionExternalHooksService);
+      await flushMicrotasks();
+
+      await lifecycleHooks.onDidCreateSession.run({ source: 'startup' });
+      await lifecycleHooks.onWillCloseSession.run({ reason: 'exit' });
+
+      const mainTranscript = wireRecordPath(MAIN_AGENT_ID);
+      expect(readHookLog(path)).toEqual([
+        { event: 'SessionStart', agentId: MAIN_AGENT_ID, transcriptPath: mainTranscript },
+        { event: 'SessionEnd', agentId: MAIN_AGENT_ID, transcriptPath: mainTranscript },
+      ]);
+    } finally {
+      ix?.dispose();
+      disposables.dispose();
+    }
+  });
+
+  it('tells agent-scope hooks where that agent writes its wire transcript', async () => {
+    const disposables = new DisposableStore();
+    let ix: TestInstantiationService | undefined;
+    try {
+      const agentId = 'agent-7';
+      const loop = stubLoopWithHooks();
+      const path = hookLogPath();
+      const command = transcriptPathLogCommand(path);
+
+      ix = createServices(disposables, {
+        strict: true,
+        additionalServices: (reg) => {
+          registerStateServices(reg);
+          reg.defineInstance(IBootstrapService, stubBootstrap(TEST_HOME_DIR));
+          reg.defineInstance(ISessionContext, addressedSessionContext());
+          reg.defineInstance(
+            IAgentScopeContext,
+            makeAgentScopeContext({
+              agentId,
+              agentScope: agentScopeOf(TEST_SESSION_SCOPE, agentId),
+            }),
+          );
+          reg.defineInstance(ISessionMetadata, stubSessionMetadata());
+          reg.definePartialInstance(IConfigService, {
+            ready: Promise.resolve(),
+            get: <T = unknown>(domain: string): T =>
+              (domain === HOOKS_SECTION
+                ? [{ event: 'Stop' as const, command, timeout: 5 }]
+                : undefined) as T,
+          });
+          reg.definePartialInstance(IPluginService, {
+            enabledHooks: async () => [],
+            onDidReload: Event.None as IPluginService['onDidReload'],
+          });
+          reg.defineInstance(IAgentContextMemoryService, stubContextMemory());
+          reg.defineInstance(IAgentLoopService, loop);
+          reg.define(IEventBus, EventBusService);
+          reg.definePartialInstance(IAgentPromptService, {
+            hooks: createHooks(['onBeforeSubmitPrompt']),
+          });
+          reg.defineInstance(IAgentToolExecutorService, stubToolExecutor());
+          reg.definePartialInstance(IAgentPermissionGate, {});
+          reg.definePartialInstance(IAgentFullCompactionService, {
+            hooks: createHooks(['onWillCompact']),
+          });
+          reg.definePartialInstance(IAgentTaskService, {});
+          reg.define(IHostProcessService, HostProcessService);
+        },
+      });
+      ix.set(IExternalHooksRunnerService, new SyncDescriptor(ExternalHooksRunnerService));
+      ix.set(IAgentExternalHooksService, new SyncDescriptor(AgentExternalHooksService));
+      ix.get(IAgentExternalHooksService);
+      await flushMicrotasks();
+
+      await loop.hooks.onDidFinishStep.run(makeAfterStep(new AbortController().signal));
+
+      // A subagent must be told about its own journal, not the main agent's.
+      expect(readHookLog(path)).toEqual([
+        { event: 'Stop', agentId, transcriptPath: wireRecordPath(agentId) },
+      ]);
+    } finally {
+      ix?.dispose();
+      disposables.dispose();
+    }
+  });
+
   it('translates turn.started, prompt.queued, and task.started bus events into hooks', async () => {
     const disposables = new DisposableStore();
     let ix: TestInstantiationService | undefined;
@@ -1405,7 +1582,7 @@ describe('IExternalHooksRunnerService integration', () => {
       });
       await flushMicrotasks();
 
-      expect(fired).toEqual([
+      expect(fired).toMatchObject([
         {
           event: 'TurnStarted',
           matcherValue: 'system_trigger',

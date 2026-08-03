@@ -15,7 +15,10 @@
  * event is configured), enriches every payload it sends with the cached
  * session title (seeded from and kept fresh by `ISessionMetadata`), and
  * resolves the SessionStart model/profile facts from `IModelService` /
- * `ISessionAgentProfileCatalog`. The slot/event host lives on the service
+ * `ISessionAgentProfileCatalog`. Whole-session events additionally carry the
+ * main agent's id and wire transcript path; the subagent events do not, because
+ * the agent they act for is not identifiable from their hook contexts.
+ * The slot/event host lives on the service
  * that owns the run; this adapter only registers its
  * own listeners here, so the runner owns the slots it runs — the same pattern
  * the Agent-scope adapter follows against the agent behavior services. The
@@ -23,6 +26,8 @@
  * `IExternalHooksRunnerService`; all config/plugin loading and engine lifecycle
  * live in the runner. Bound at Session scope.
  */
+
+import { join } from 'pathe';
 
 import { Disposable } from '#/_base/di/lifecycle';
 import { LifecycleScope, ScopeActivation, registerScopedService } from '#/_base/di/scope';
@@ -50,6 +55,7 @@ import {
   type AgentTaskStopHookContext,
   ISessionSubagentService,
 } from '#/session/subagent/subagent';
+import { AGENT_WIRE_RECORD_KEY } from '#/wire/record';
 import { IWireService } from '#/wire/wire';
 
 import { ISessionExternalHooksService } from './externalHooks';
@@ -140,17 +146,40 @@ export class SessionExternalHooksService
     } catch {}
   }
 
+  /**
+   * The session-level facts every whole-session event carries. Those events
+   * speak for the session rather than for one agent, so the transcript they
+   * point at is the main agent's live wire journal — the same file the
+   * Agent-scope adapter reports for `main`.
+   *
+   * `SubagentStart` / `SubagentStop` deliberately do not get these: the acting
+   * agent's id is not on their hook contexts (only the profile name is), and an
+   * absent `transcript_path` is recoverable for a hook where a wrong one is not.
+   */
+  private withMainAgentFacts(inputData: Record<string, unknown>): Record<string, unknown> {
+    return {
+      sessionTitle: this.sessionTitle,
+      agentId: MAIN_AGENT_ID,
+      transcriptPath: join(
+        this.context.sessionDir,
+        'agents',
+        MAIN_AGENT_ID,
+        AGENT_WIRE_RECORD_KEY,
+      ),
+      ...inputData,
+    };
+  }
+
   private async triggerSessionStart(source: SessionStartHookSource): Promise<void> {
     const results = await this.runner.trigger('SessionStart', {
       matcherValue: source,
       cwd: this.context.cwd,
       sessionId: this.context.sessionId,
-      inputData: {
+      inputData: this.withMainAgentFacts({
         source,
-        sessionTitle: this.sessionTitle,
         model: this.models.getDefaultModel(),
         profile: await this.defaultProfileName(),
-      },
+      }),
     });
     await this.appendSessionStartHookContext(results);
   }
@@ -194,7 +223,7 @@ export class SessionExternalHooksService
       matcherValue: reason,
       cwd: this.context.cwd,
       sessionId: this.context.sessionId,
-      inputData: { reason, sessionTitle: this.sessionTitle },
+      inputData: this.withMainAgentFacts({ reason }),
     });
   }
 
@@ -204,10 +233,9 @@ export class SessionExternalHooksService
       void this.runner.fireAndForgetTrigger('SessionHeartbeat', {
         cwd: this.context.cwd,
         sessionId: this.context.sessionId,
-        inputData: {
-          sessionTitle: this.sessionTitle,
+        inputData: this.withMainAgentFacts({
           uptimeMs: Date.now() - this.createdAt,
-        },
+        }),
       });
     } catch {}
   }

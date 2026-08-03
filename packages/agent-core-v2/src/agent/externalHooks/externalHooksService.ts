@@ -10,7 +10,9 @@
  * of its own). This includes the bus-driven lifecycle signals
  * `turn.started` → `TurnStarted`, `prompt.queued` → `UserPromptQueued`, and
  * `task.started` → `TaskStarted`. Every payload it sends is enriched with the
- * cached session title (seeded from and kept fresh by `ISessionMetadata`).
+ * cached session title (seeded from and kept fresh by `ISessionMetadata`) plus
+ * this agent's id and the absolute path of the wire transcript it appends to,
+ * so a hook can read the transcript without rediscovering the session layout.
  * Appends
  * UserPromptSubmit hook results through `contextMemory`, drives Stop hook
  * continuations by enqueueing a mergeable `StepRequest` onto `loop`, and
@@ -20,6 +22,8 @@
  * into `agentState` (`IAgentStateService`) and read/written through it; the
  * hook listener registrations stay ordinary disposables on the instance.
  */
+
+import { join } from 'pathe';
 
 import { IInstantiationService } from '#/_base/di/instantiation';
 import { Disposable } from '#/_base/di/lifecycle';
@@ -36,6 +40,7 @@ import {
 } from '#/agent/fullCompaction/fullCompaction';
 import type { CompactionResult } from '#/agent/fullCompaction/types';
 import { IAgentLoopService, type AfterStepContext } from '#/agent/loop/loop';
+import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { ContinuationStepRequest } from '#/agent/loop/stepRequest';
 import {
   IAgentPromptService,
@@ -50,6 +55,7 @@ import { IAgentToolExecutorService } from '#/agent/toolExecutor/toolExecutor';
 import { toKimiErrorPayload } from '#/errors';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
+import { AGENT_WIRE_RECORD_KEY } from '#/wire/record';
 
 import { IAgentExternalHooksService } from './externalHooks';
 import { IExternalHooksRunnerService } from '#/app/externalHooksRunner/externalHooksRunner';
@@ -87,6 +93,7 @@ export class AgentExternalHooksService extends Disposable implements IAgentExter
     @IEventBus private readonly eventBus: IEventBus,
     @IInstantiationService private readonly instantiation: IInstantiationService,
     @ISessionContext private readonly sessionContext: ISessionContext,
+    @IAgentScopeContext private readonly agentScope: IAgentScopeContext,
     @ISessionMetadata private readonly sessionMetadata: ISessionMetadata,
     @IAgentStateService private readonly states: IAgentStateService,
   ) {
@@ -114,8 +121,27 @@ export class AgentExternalHooksService extends Disposable implements IAgentExter
 
   private sessionTitle: string | undefined;
 
+  /**
+   * The wire transcript this agent is appending to, as an absolute path. It is
+   * the live journal (`IWireService` keeps appending to it), so a hook reading
+   * it at turn end sees the turn it fired for.
+   */
+  private get transcriptPath(): string {
+    return join(
+      this.sessionContext.sessionDir,
+      'agents',
+      this.agentScope.agentId,
+      AGENT_WIRE_RECORD_KEY,
+    );
+  }
+
   private withSessionFacts(inputData: Record<string, unknown>): Record<string, unknown> {
-    return { sessionTitle: this.sessionTitle, ...inputData };
+    return {
+      sessionTitle: this.sessionTitle,
+      agentId: this.agentScope.agentId,
+      transcriptPath: this.transcriptPath,
+      ...inputData,
+    };
   }
 
   private get stopHookContinuationUsed(): boolean {
