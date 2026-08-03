@@ -62,9 +62,15 @@ Hook 命令的工作目录是当前会话的项目目录。非 Windows 平台上
 {
   "hook_event_name": "PreToolUse",
   "session_id": "session_abc",
-  "cwd": "/path/to/project"
+  "cwd": "/path/to/project",
+  "agent_id": "main",
+  "transcript_path": "/home/you/.kimi-code/sessions/wd_project_a1b2c3/session_abc/agents/main/wire.jsonl"
 }
 ```
+
+`agent_id` 与 `transcript_path` 标识触发该 hook 的 agent，以及该 agent 的 wire 记录文件（wire transcript）的绝对路径——这是会话运行期间引擎持续追加写入的 JSONL 日志，脚本可以直接读取，无需自行推断会话目录结构。子 agent 的 hook 拿到的是它自己的记录文件，而不是主 agent 的。
+
+当 CLI 无法确定这两个字段时会**直接省略**它们，因此脚本必须能处理字段缺失的情况，而不是假定一定有值。`SubagentStart` 和 `SubagentStop` 完全不带这两个字段：这两个事件描述的 agent 在该时点无法被 CLI 识别，与其给出错误的路径，不如不给。
 
 具体事件还会附带额外字段（如工具名称、命令内容），见下方事件一览。所有字段名使用下划线命名（snake_case）。
 

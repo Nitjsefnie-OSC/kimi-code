@@ -185,6 +185,15 @@ interface PersistedSessionState extends SessionMeta {
 const BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV = 'KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT';
 const ACTIVE_TURN_CLOSE_TIMEOUT_MS = 8_000;
 
+/**
+ * The wire transcript of the agent whose per-agent directory is `agentHomedir`
+ * — the same file {@link Agent} records into (`FileSystemAgentRecordPersistence`).
+ * Handed to external hooks as `transcript_path`.
+ */
+function agentTranscriptPath(agentHomedir: string): string {
+  return join(agentHomedir, 'wire.jsonl');
+}
+
 async function waitForSettlementOrTimeout(
   promise: Promise<unknown>,
   timeoutMs: number,
@@ -277,6 +286,11 @@ export class Session {
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.kaos.getcwd(),
       sessionId: options.id,
+      // Session-level events (SessionStart / SessionEnd) speak for the session
+      // as a whole, whose transcript is the main agent's. Per-agent engines
+      // (see `instantiateAgent`) override both fields with their own agent.
+      agentId: 'main',
+      transcriptPath: agentTranscriptPath(join(options.homedir, 'agents', 'main')),
     });
     this.telemetry = options.telemetry ?? noopTelemetryClient;
     this.toolKaos = options.kaos;
@@ -1197,7 +1211,12 @@ export class Session {
       skills: this.skills,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
       modelProvider: this.options.providerManager,
-      hookEngine: config.hookEngine ?? this.hookEngine,
+      hookEngine:
+        config.hookEngine ??
+        this.hookEngine.forAgent({
+          agentId: id,
+          transcriptPath: agentTranscriptPath(homedir),
+        }),
       subagentHost,
       mcp: this.mcp,
       permission: this.permissionOptions(parentAgentId, config.permission),

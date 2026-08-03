@@ -878,7 +878,7 @@ describe('AgentTaskService — notification delivery', () => {
     });
     expect(fireAndForgetTrigger).toHaveBeenCalledWith('Notification', expect.objectContaining({
       matcherValue: 'task.completed',
-      inputData: {
+      inputData: expect.objectContaining({
         sink: 'context',
         notificationType: 'task.completed',
         title: 'Background agent completed',
@@ -886,7 +886,7 @@ describe('AgentTaskService — notification delivery', () => {
         severity: 'info',
         sourceKind: 'background_task',
         sourceId: taskId,
-      },
+      }),
     }));
   });
 
@@ -932,7 +932,7 @@ describe('AgentTaskService — notification delivery', () => {
     });
     expect(fireAndForgetTrigger).toHaveBeenCalledWith('Notification', expect.objectContaining({
       matcherValue: 'task.completed',
-      inputData: {
+      inputData: expect.objectContaining({
         sink: 'context',
         notificationType: 'task.completed',
         title: 'Background process completed',
@@ -940,7 +940,7 @@ describe('AgentTaskService — notification delivery', () => {
         severity: 'info',
         sourceKind: 'background_task',
         sourceId: taskId,
-      },
+      }),
     }));
   });
 });

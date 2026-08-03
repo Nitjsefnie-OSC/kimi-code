@@ -62,9 +62,15 @@ Each time a hook triggers, the CLI passes the following base information to the 
 {
   "hook_event_name": "PreToolUse",
   "session_id": "session_abc",
-  "cwd": "/path/to/project"
+  "cwd": "/path/to/project",
+  "agent_id": "main",
+  "transcript_path": "/home/you/.kimi-code/sessions/wd_project_a1b2c3/session_abc/agents/main/wire.jsonl"
 }
 ```
+
+`agent_id` and `transcript_path` identify the agent the hook fired for and the absolute path of that agent's wire transcript — the append-only JSONL journal the engine writes as the session runs, so a script can read it directly instead of reconstructing the session layout. A sub-agent's hooks report that sub-agent's own transcript, not the main agent's.
+
+Both fields are **omitted** when the CLI cannot determine them, so a script must handle their absence rather than assume a value. `SubagentStart` and `SubagentStop` do not carry them at all: those events describe an agent the CLI cannot identify at that point, and an absent path is safer than a wrong one.
 
 Specific events will also include additional fields (such as tool name and command content); see the event reference below. All field names use snake_case.
 
