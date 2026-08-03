@@ -92,7 +92,26 @@ You can also return a JSON object via stdout to block:
 
 ::: info Which events support blocking?
 Only **blockable events** (`PreToolUse`, `Stop`, `UserPromptSubmit`) have return values that affect the main flow. All other events are **observation-only events** — they fire and forget; the main flow is unaffected regardless of what the script returns.
+
+"Observation-only" is about control flow, not about output: `SessionStart` cannot stop or alter the session, but its output *is* added to the model's context. See [Seeding context at session start](#seeding-context-at-session-start).
 :::
+
+## Seeding context at session start
+
+A `SessionStart` hook's output is appended to the main agent's context as a system reminder, so the model knows it from its first turn. Use it to seed a session with facts a static instruction file cannot carry — the current branch, open tasks, deployment state:
+
+```toml
+[[hooks]]
+event = "SessionStart"
+command = "echo \"Current branch: $(git branch --show-current)\""
+```
+
+The text is taken from the JSON `message` field when the script prints one, and from raw stdout otherwise — the same rule `UserPromptSubmit` follows. A script that exits non-zero or times out contributes nothing, so a broken hook cannot feed the model garbage; and because `SessionStart` is observation-only, a `block` decision contributes no text and still does not stop the session.
+
+Two limits worth knowing:
+
+- It applies to the **main agent** only. Sub-agents do not receive it.
+- If the session has no main agent when the hook runs, the output is discarded. This is the case for a session created through the server API without a main-agent binding, where the main agent is materialized lazily on first use.
 
 ## Event Reference
 
@@ -105,7 +124,7 @@ Only **blockable events** (`PreToolUse`, `Stop`, `UserPromptSubmit`) have return
 | `PostToolUseFailure` | Tool name | — | Triggered after a tool fails or is blocked (observation only) |
 | `PermissionRequest` | Tool name | — | Triggered just before waiting for user approval (observation only) |
 | `PermissionResult` | Tool name | — | Triggered after approval completes (observation only) |
-| `SessionStart` | `startup` or `resume` | — | Triggered after a new session starts or a previous session resumes |
+| `SessionStart` | `startup` or `resume` | — | Triggered after a new session starts or a previous session resumes; returned text is appended to the main agent's context as a system reminder (see [Seeding context at session start](#seeding-context-at-session-start)) |
 | `SessionEnd` | `exit` | — | Triggered after a session closes |
 | `SubagentStart` | Sub-agent name | — | Triggered before a sub-agent starts running |
 | `SubagentStop` | Sub-agent name | — | Triggered after a sub-agent completes successfully (observation only) |

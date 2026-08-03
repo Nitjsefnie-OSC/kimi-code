@@ -10,22 +10,40 @@ export interface RenderedHookResult {
   readonly text: string;
 }
 
-export function renderUserPromptHookResult(
+/**
+ * Collects the context text a non-blocking hook run contributes, for any event
+ * whose results are fed back to the model. `UserPromptSubmit` appends it to the
+ * prompt; `SessionStart` appends it as a system reminder on the main agent.
+ */
+export function renderContextHookResult(
+  event: string,
   results: readonly HookResult[] | undefined,
 ): RenderedHookResult | undefined {
   const messages =
     results
       ?.filter((result) => result.action !== 'block')
-      ?.map(userPromptHookMessage)
+      ?.map(contextHookMessage)
       .filter(isNonEmptyString) ??
     [];
   if (messages.length === 0) return undefined;
   const displayMessage = messages.join('\n\n');
   return {
-    event: 'UserPromptSubmit',
+    event,
     message: displayMessage,
-    text: messages.map((message) => renderHookResult('UserPromptSubmit', message)).join('\n'),
+    text: messages.map((message) => renderHookResult(event, message)).join('\n'),
   };
+}
+
+export function renderUserPromptHookResult(
+  results: readonly HookResult[] | undefined,
+): RenderedHookResult | undefined {
+  return renderContextHookResult('UserPromptSubmit', results);
+}
+
+export function renderSessionStartHookResult(
+  results: readonly HookResult[] | undefined,
+): RenderedHookResult | undefined {
+  return renderContextHookResult('SessionStart', results);
 }
 
 export function renderUserPromptHookBlockResult(
@@ -51,7 +69,7 @@ export function renderUserPromptHookBlockResult(
   };
 }
 
-function userPromptHookMessage(result: HookResult): string | undefined {
+function contextHookMessage(result: HookResult): string | undefined {
   if (result.timedOut === true || (result.exitCode !== undefined && result.exitCode !== 0)) {
     return undefined;
   }
