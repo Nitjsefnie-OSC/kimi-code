@@ -92,7 +92,26 @@ Hook 命令的工作目录是当前会话的项目目录。非 Windows 平台上
 
 ::: info 哪些事件支持阻断？
 只有**可阻断事件**（`PreToolUse`、`Stop`、`UserPromptSubmit`）的返回值会影响主流程。其余事件属于**观察型事件**——触发后即发即忘，不管脚本返回什么，主流程都不会改变。
+
+“观察型”指的是控制流，而不是输出：`SessionStart` 无法中止或改变会话，但它的输出**会**进入模型上下文。参见[在会话开始时注入上下文](#在会话开始时注入上下文)。
 :::
+
+## 在会话开始时注入上下文
+
+`SessionStart` 钩子的输出会作为 system reminder 追加到主 Agent 的上下文中，模型从第一轮起就能看到。适合注入静态指令文件无法承载的事实——当前分支、待办事项、部署状态等：
+
+```toml
+[[hooks]]
+event = "SessionStart"
+command = "echo \"当前分支：$(git branch --show-current)\""
+```
+
+脚本输出 JSON 时取其 `message` 字段，否则取原始 stdout——与 `UserPromptSubmit` 的规则一致。脚本非零退出或超时则不贡献任何文本，因此坏掉的钩子不会把垃圾喂给模型；又因为 `SessionStart` 属于观察型事件，`block` 决定既不贡献文本，也仍然不会中止会话。
+
+两点限制：
+
+- 只作用于**主 Agent**，子 Agent 不会收到。
+- 钩子运行时若会话还没有主 Agent，输出会被丢弃。通过服务端 API 创建、且未携带主 Agent 绑定的会话就属于这种情况——它的主 Agent 是首次使用时才惰性创建的。
 
 ## 事件一览
 
@@ -105,7 +124,7 @@ Hook 命令的工作目录是当前会话的项目目录。非 Windows 平台上
 | `PostToolUseFailure` | 工具名 | — | 工具失败或被阻断后触发（观察用） |
 | `PermissionRequest` | 工具名 | — | 即将等待用户审批前触发（观察用） |
 | `PermissionResult` | 工具名 | — | 审批结束后触发（观察用） |
-| `SessionStart` | `startup` 或 `resume` | — | 新会话启动或历史会话恢复后触发 |
+| `SessionStart` | `startup` 或 `resume` | — | 新会话启动或历史会话恢复后触发；返回文本会作为 system reminder 附加到主 Agent 的上下文（参见[在会话开始时注入上下文](#在会话开始时注入上下文)） |
 | `SessionEnd` | `exit` | — | 会话关闭后触发 |
 | `SubagentStart` | 子 Agent 名称 | — | 子 Agent 开始运行前触发 |
 | `SubagentStop` | 子 Agent 名称 | — | 子 Agent 成功完成后触发（观察用） |

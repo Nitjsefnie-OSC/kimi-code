@@ -11,7 +11,7 @@ import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
 import { renderPluginSessionStartReminder } from '../agent/injection/plugin-session-start';
-import { HookEngine, type HookDef } from './hooks';
+import { HookEngine, renderSessionStartHookResult, type HookDef, type HookResult } from './hooks';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
 import {
   appendWorkspaceAdditionalDir,
@@ -1367,10 +1367,37 @@ export class Session {
   }
 
   private async triggerSessionStart(source: 'startup' | 'resume'): Promise<void> {
-    await this.hookEngine.trigger('SessionStart', {
+    const results = await this.hookEngine.trigger('SessionStart', {
       matcherValue: source,
       inputData: { source },
     });
+    await this.appendSessionStartHookContext(results);
+  }
+
+  /**
+   * Feeds a `SessionStart` hook's output back into the main agent's context, so
+   * a hook can seed the session with state the model should know from its first
+   * turn (branch, open tasks, environment facts). Mirrors what
+   * `UserPromptSubmit` does with its results, minus the blocking path:
+   * `SessionStart` is observation-only, so a `block` result contributes no text
+   * and never stops the session.
+   *
+   * Silently does nothing when no hook produced output, or when the session has
+   * no ready main agent (a resume whose metadata carries no `main` entry) —
+   * hook failures must never keep a session from opening.
+   */
+  private async appendSessionStartHookContext(
+    results: readonly HookResult[],
+  ): Promise<void> {
+    const rendered = renderSessionStartHookResult(results);
+    if (rendered === undefined) return;
+    const mainAgent = this.getReadyAgent('main');
+    if (mainAgent === undefined) return;
+    mainAgent.context.appendSystemReminder(rendered.text, {
+      kind: 'hook_result',
+      event: 'SessionStart',
+    });
+    await mainAgent.records.flush();
   }
 
   private async triggerSessionEnd(reason: 'exit'): Promise<void> {

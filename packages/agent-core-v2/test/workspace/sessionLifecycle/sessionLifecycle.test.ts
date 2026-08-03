@@ -477,6 +477,45 @@ class RecordingSessionExternalHooksService
   }
 }
 
+interface MainAgentProbeRecord {
+  readonly source: string;
+  readonly sessionId: string;
+  readonly hasMain: boolean;
+}
+
+let recordedMainAtSessionStart: MainAgentProbeRecord[] = [];
+
+/**
+ * Stands in for the real `externalHooks` adapter to record whether the
+ * session's `main` agent is already registered when the `onDidCreateSession`
+ * slot runs — the precondition the adapter's `SessionStart` context injection
+ * depends on.
+ */
+class MainAgentProbeSessionExternalHooksService
+  extends Disposable
+  implements ISessionExternalHooksService
+{
+  declare readonly _serviceBrand: undefined;
+
+  constructor(
+    @ISessionContext private readonly context: ISessionContext,
+    @ISessionLifecycleHooks hooks: Hooks<SessionLifecycleHookSlots>,
+    @IAgentLifecycleService private readonly agents: IAgentLifecycleService,
+  ) {
+    super();
+    this._register(
+      hooks.onDidCreateSession.register('test', async (event, next) => {
+        recordedMainAtSessionStart.push({
+          source: event.source,
+          sessionId: this.context.sessionId,
+          hasMain: this.agents.get(MAIN_AGENT_ID) !== undefined,
+        });
+        await next();
+      }),
+    );
+  }
+}
+
 describe('SessionLifecycleService', () => {
   let host: ScopedTestHost | undefined;
   let telemetryRecords: TelemetryRecord[];
@@ -484,6 +523,7 @@ describe('SessionLifecycleService', () => {
 
   beforeEach(() => {
     recordedSessionHookEvents = [];
+    recordedMainAtSessionStart = [];
     telemetryRecords = [];
     tmpRoots = [];
     _clearScopedRegistryForTests();
@@ -1050,6 +1090,40 @@ describe('SessionLifecycleService', () => {
     await svc.close('s1');
 
     expect(recordedSessionHookEvents).toEqual(['create:startup:s1', 'close:exit:s1']);
+  });
+
+  it('registers the main agent before the session lifecycle slot runs, except for a create with no main-agent binding', async () => {
+    registerScopedService(
+      LifecycleScope.Session,
+      ISessionExternalHooksService,
+      MainAgentProbeSessionExternalHooksService,
+      ScopeActivation.OnScopeCreated,
+      'externalHooks',
+    );
+
+    const created = await build([
+      stubPair(IAgentLifecycleService, agentLifecycleCapturingPlanSpy().lifecycle),
+    ]);
+    await created.create({ sessionId: 's1', workDir: '/tmp/proj' });
+    await created.create({
+      sessionId: 's2',
+      workDir: '/tmp/proj',
+      mainAgentBinding: { profile: 'coder', model: 'mock' },
+    });
+
+    const resumed = await build([
+      stubPair(IAgentLifecycleService, agentLifecycleCapturingPlanSpy().lifecycle),
+      stubPair(ISessionIndex, sessionIndexWithSummary('s3', '/tmp/proj', 'wd_stub')),
+    ]);
+    await resumed.resume('s3');
+
+    expect(recordedMainAtSessionStart).toEqual([
+      // A create without a main-agent binding materializes no agent, so the
+      // hook adapter has nothing to inject the SessionStart output into.
+      { source: 'startup', sessionId: 's1', hasMain: false },
+      { source: 'startup', sessionId: 's2', hasMain: true },
+      { source: 'resume', sessionId: 's3', hasMain: true },
+    ]);
   });
 
   it('waits for MCP initialization before create returns', async () => {

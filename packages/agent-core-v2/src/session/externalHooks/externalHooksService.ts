@@ -5,7 +5,8 @@
  * Registers with the per-session `sessionLifecycleHooks` slots (seeded by
  * the Workspace-scope `sessionLifecycle`, which runs them around
  * create/close) to run `SessionStart` and `SessionEnd` external commands
- * for the current `sessionContext`, and
+ * for the current `sessionContext` — a `SessionStart` hook's output is fed
+ * back into the main agent's context as a system reminder — and
  * observes the requester-side agent-run hook slot (`onWillStartAgentTask`) and
  * stop event (`onDidStopAgentTask`) hosted on the `subagent` domain's
  * `ISessionSubagentService` to translate them into the `SubagentStart` /
@@ -27,8 +28,12 @@ import { Disposable } from '#/_base/di/lifecycle';
 import { LifecycleScope, ScopeActivation, registerScopedService } from '#/_base/di/scope';
 import { IntervalTimer } from '#/_base/utils/timer';
 import { IExternalHooksRunnerService } from '#/app/externalHooksRunner/externalHooksRunner';
+import type { HookResult } from '#/agent/externalHooks/types';
+import { renderSessionStartHookResult } from '#/agent/externalHooks/user-prompt';
+import { IAgentSystemReminderService } from '#/agent/systemReminder/systemReminder';
 import type { Hooks } from '#/hooks';
 import { IModelService } from '#/kosong/model/model';
+import { IAgentLifecycleService, MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
 import {
   ISessionAgentProfileCatalog,
 } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
@@ -45,6 +50,7 @@ import {
   type AgentTaskStopHookContext,
   ISessionSubagentService,
 } from '#/session/subagent/subagent';
+import { IWireService } from '#/wire/wire';
 
 import { ISessionExternalHooksService } from './externalHooks';
 
@@ -69,6 +75,7 @@ export class SessionExternalHooksService
     @ISessionAgentProfileCatalog private readonly profiles: ISessionAgentProfileCatalog,
     @IModelService private readonly models: IModelService,
     @IExternalHooksRunnerService private readonly runner: IExternalHooksRunnerService,
+    @IAgentLifecycleService private readonly agents: IAgentLifecycleService,
   ) {
     super();
     void this.metadata
@@ -134,7 +141,7 @@ export class SessionExternalHooksService
   }
 
   private async triggerSessionStart(source: SessionStartHookSource): Promise<void> {
-    await this.runner.trigger('SessionStart', {
+    const results = await this.runner.trigger('SessionStart', {
       matcherValue: source,
       cwd: this.context.cwd,
       sessionId: this.context.sessionId,
@@ -145,6 +152,32 @@ export class SessionExternalHooksService
         profile: await this.defaultProfileName(),
       },
     });
+    await this.appendSessionStartHookContext(results);
+  }
+
+  /**
+   * Feeds a `SessionStart` hook's output back into the main agent's context, so
+   * a hook can seed the session with state the model should know from its first
+   * turn (branch, open tasks, environment facts). Mirrors what
+   * `UserPromptSubmit` does with its results, minus the blocking path:
+   * `SessionStart` is observation-only, so a `block` result contributes no text
+   * and never stops the session.
+   *
+   * Silently does nothing when no hook produced output, or when the session has
+   * no main agent yet (a create without a main-agent binding) — hook failures
+   * must never keep a session from opening, so the lookup is the non-creating
+   * `get`, never `create`.
+   */
+  private async appendSessionStartHookContext(results: readonly HookResult[]): Promise<void> {
+    const rendered = renderSessionStartHookResult(results);
+    if (rendered === undefined) return;
+    const main = this.agents.get(MAIN_AGENT_ID);
+    if (main === undefined) return;
+    main.accessor.get(IAgentSystemReminderService)?.appendSystemReminder(rendered.text, {
+      kind: 'hook_result',
+      event: 'SessionStart',
+    });
+    await main.accessor.get(IWireService)?.flush();
   }
 
   private async defaultProfileName(): Promise<string | undefined> {

@@ -9,6 +9,7 @@ import type { KaosProcess } from '@moonshot-ai/kaos';
 import { testKaos } from '../fixtures/test-kaos';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { Agent } from '../../src/agent';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { ProcessBackgroundTask } from '../../src/agent/background';
@@ -91,6 +92,101 @@ describe('Session lifecycle hooks', () => {
         source: 'resume',
       },
     ]);
+  });
+
+  it('appends SessionStart hook output to the main agent context', async () => {
+    const { sessionDir, workDir } = await hookFixture();
+    const session = new Session({
+      kaos: testKaos.withCwd(workDir),
+      id: 'session-start-context',
+      homedir: sessionDir,
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+      hooks: [
+        { event: 'SessionStart', matcher: 'startup', command: 'echo on-branch-topic', timeout: 5 },
+      ],
+    });
+
+    const agent = await session.createMain();
+
+    expect(sessionStartHookMessages(agent)).toEqual([
+      '<system-reminder>\n<hook_result hook_event="SessionStart">\non-branch-topic\n</hook_result>\n</system-reminder>',
+    ]);
+    await session.close();
+  });
+
+  it('prefers the structured JSON message over raw stdout for SessionStart', async () => {
+    const { sessionDir, workDir } = await hookFixture();
+    const session = new Session({
+      kaos: testKaos.withCwd(workDir),
+      id: 'session-start-context-json',
+      homedir: sessionDir,
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+      hooks: [
+        {
+          event: 'SessionStart',
+          command: `echo ${JSON.stringify(JSON.stringify({ message: 'structured-context' }))}`,
+          timeout: 5,
+        },
+      ],
+    });
+
+    const agent = await session.createMain();
+
+    expect(sessionStartHookMessages(agent)).toEqual([
+      '<system-reminder>\n<hook_result hook_event="SessionStart">\nstructured-context\n</hook_result>\n</system-reminder>',
+    ]);
+    await session.close();
+  });
+
+  it('injects nothing when a SessionStart hook is silent or fails', async () => {
+    const { sessionDir, workDir } = await hookFixture();
+    const session = new Session({
+      kaos: testKaos.withCwd(workDir),
+      id: 'session-start-context-empty',
+      homedir: sessionDir,
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+      hooks: [
+        { event: 'SessionStart', command: 'true', timeout: 5 },
+        // Non-zero exit: the stdout of a failed hook must not reach the model.
+        { event: 'SessionStart', command: 'echo from-failed-hook; exit 1', timeout: 5 },
+      ],
+    });
+
+    const agent = await session.createMain();
+
+    expect(sessionStartHookMessages(agent)).toEqual([]);
+    await session.close();
+  });
+
+  it('does not fail a resume whose SessionStart hook emits output with no main agent', async () => {
+    const { sessionDir, workDir } = await hookFixture();
+    await writeFile(
+      join(sessionDir, 'state.json'),
+      JSON.stringify({
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        title: 'Resumed Session',
+        isCustomTitle: false,
+        agents: {},
+        custom: {},
+      }),
+      'utf-8',
+    );
+    const session = new Session({
+      kaos: testKaos.withCwd(workDir),
+      id: 'session-start-context-resume',
+      homedir: sessionDir,
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+      hooks: [
+        { event: 'SessionStart', matcher: 'resume', command: 'echo resumed-context', timeout: 5 },
+      ],
+    });
+
+    await expect(session.resume()).resolves.toBeDefined();
   });
 
   it('does not let failing SessionStart or SessionEnd hook commands interrupt startup or close', async () => {
@@ -692,6 +788,19 @@ describe('Session lifecycle hooks', () => {
     ]);
   });
 });
+
+function sessionStartHookMessages(agent: Agent): readonly string[] {
+  return agent.context.history
+    .filter(
+      (message) => message.origin?.kind === 'hook_result' && message.origin.event === 'SessionStart',
+    )
+    .map((message) =>
+      message.content
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join(''),
+    );
+}
 
 async function hookFixture(): Promise<{
   readonly command: string;
