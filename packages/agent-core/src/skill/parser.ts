@@ -99,9 +99,56 @@ export function parseFrontmatter(text: string): ParsedFrontmatter {
   try {
     return { data: loadYaml(yamlText) ?? {}, body };
   } catch (error) {
+    const relaxed = parseRelaxedFlatFrontmatter(yamlText);
+    if (relaxed !== undefined) return { data: relaxed, body };
     const message = error instanceof Error ? error.message : String(error);
     throw new FrontmatterError(message, error);
   }
+}
+
+/**
+ * Rescue the one invalid-YAML shape the skill ecosystem produces constantly:
+ * a flat `key: value` block whose value is an unquoted sentence containing
+ * `": "`.
+ *
+ * `description: Use when X. Triggers: user says ...` is not valid YAML — the
+ * second colon reads as a nested mapping and js-yaml rejects the document with
+ * "bad indentation of a mapping entry". Skill authors write it anyway, because
+ * the reference implementation accepts it, so a strict parser silently drops
+ * most of a catalogue: on the box this was found, 23 of 28 installed skills
+ * failed to load and the failure was invisible — a dropped skill looks exactly
+ * like a skill that was never installed.
+ *
+ * Deliberately narrow. It only applies after strict parsing has already
+ * failed, and only to a block where EVERY line is a simple top-level
+ * `key: value` pair. Anything with nesting, sequences, block scalars, comments
+ * or continuations returns undefined and the original YAML error stands —
+ * so a genuinely malformed document still reports the real problem rather than
+ * being silently reinterpreted.
+ */
+function parseRelaxedFlatFrontmatter(yamlText: string): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {};
+  for (const raw of yamlText.split(/\r?\n/)) {
+    if (raw.trim() === '') continue;
+    if (raw !== raw.trimStart()) return undefined; // indented -> nested, not flat
+    const match = /^([A-Za-z0-9_][A-Za-z0-9_-]*):[ \t]+(\S.*)$/.exec(raw);
+    if (match === null) return undefined;
+    const [, key, value] = match;
+    if (key === undefined || value === undefined) return undefined;
+    const first = value[0];
+    // Leave anything with YAML meaning to the strict parser.
+    if (first !== undefined && '|>&*!%@`[{#'.includes(first)) return undefined;
+    if (Object.hasOwn(out, key)) return undefined;
+    if (first === '"' || first === "'") {
+      // An opened quote that never closes is a genuinely malformed scalar, not
+      // the unquoted-sentence case this rescues. Defer to the real YAML error.
+      if (value.length < 2 || !value.endsWith(first)) return undefined;
+      out[key] = value.slice(1, -1);
+      continue;
+    }
+    out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export function parseSkillText(options: ParseSkillTextOptions): SkillDefinition {

@@ -18,6 +18,26 @@ const USER_GENERIC_DIRS = ['.agents/skills'] as const;
 const PROJECT_BRAND_DIRS = ['.kimi-code/skills'] as const;
 const PROJECT_GENERIC_DIRS = ['.agents/skills'] as const;
 
+/**
+ * `DEBUG_SKILL_ROOTS=1` traces every skill-root decision to stderr.
+ *
+ * Skill discovery is a chain of silent no-ops by design: a configured dir that
+ * does not resolve where you think, or resolves somewhere that is not a
+ * directory, is dropped without a word, so "my skills are not loaded" carries
+ * no information about WHICH link failed. This prints the input, the resolved
+ * path, and the accept/reject verdict at each link, which is the difference
+ * between reading the code and knowing what it did.
+ */
+const DEBUG = Boolean(process.env['DEBUG_SKILL_ROOTS']);
+
+function trace(event: string, fields: Record<string, unknown>): void {
+  if (!DEBUG) return;
+  const rendered = Object.entries(fields)
+    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    .join(' ');
+  process.stderr.write(`[skill-roots] ${event} ${rendered}\n`);
+}
+
 export interface SkillRootsOptions {
   readonly mergeAllAvailableSkills?: boolean;
 }
@@ -70,10 +90,16 @@ export async function configuredRoots(
   source: SkillSource,
 ): Promise<readonly SkillRoot[]> {
   const projectRoot = await findProjectRoot(workDir);
+  trace('configuredRoots.enter', {
+    dirs, workDir, projectRoot, osHomeDir, source, count: dirs.length,
+  });
   const roots: SkillRoot[] = [];
   for (const dir of dirs) {
-    await pushExistingRoot(roots, resolveConfiguredDir(dir, projectRoot, osHomeDir), source);
+    const resolved = resolveConfiguredDir(dir, projectRoot, osHomeDir);
+    const accepted = await pushExistingRoot(roots, resolved, source);
+    trace('configuredRoots.entry', { dir, resolved, accepted });
   }
+  trace('configuredRoots.exit', { accepted: roots.map((r) => r.path) });
   return roots;
 }
 
@@ -120,9 +146,14 @@ async function pushExistingRoot(
   dir: string,
   source: SkillSource,
 ): Promise<boolean> {
-  if (!(await isDir(dir))) return false;
+  if (!(await isDir(dir))) {
+    trace('reject.notADirectory', { dir, source });
+    return false;
+  }
   const resolved = await realpath(dir);
-  if (!out.some((root) => root.path === resolved)) out.push({ path: resolved, source });
+  const duplicate = out.some((root) => root.path === resolved);
+  trace(duplicate ? 'reject.duplicate' : 'accept', { dir, resolved, source });
+  if (!duplicate) out.push({ path: resolved, source });
   return true;
 }
 
