@@ -70,6 +70,17 @@ export async function resolveSkillRoots(
   const { userHomeDir, workDir } = options.paths;
   const brandHomeDir = options.paths.brandHomeDir ?? path.join(userHomeDir, '.kimi-code');
   const projectRoot = await findProjectRoot(workDir);
+  traceSkillRoots('resolveSkillRoots.enter', {
+    workDir,
+    projectRoot,
+    projectRootIsWorkDir: path.resolve(projectRoot) === path.resolve(workDir),
+    userHomeDir,
+    brandHomeDir,
+    explicitDirs: options.explicitDirs ?? null,
+    extraDirs: options.extraDirs ?? null,
+    pluginSkillRoots: options.pluginSkillRoots?.length ?? 0,
+    mergeAllAvailableSkills,
+  });
 
   if (options.explicitDirs !== undefined && options.explicitDirs.length > 0) {
     await pushConfiguredDirs(
@@ -116,6 +127,8 @@ export async function resolveSkillRoots(
     );
   }
 
+  traceSkillRoots('resolveSkillRoots.beforePlugins', { roots: roots.map((r) => `${r.source}:${r.path}`) });
+
   if (options.pluginSkillRoots !== undefined) {
     for (const root of options.pluginSkillRoots) {
       await pushProvidedRoot(roots, root, isDir, realpath);
@@ -126,6 +139,7 @@ export async function resolveSkillRoots(
     await pushExistingRoot(roots, options.builtinDir, 'builtin', isDir, realpath);
   }
 
+  traceSkillRoots('resolveSkillRoots.exit', { roots: roots.map((r) => `${r.source}:${r.path}`) });
   return roots;
 }
 
@@ -306,6 +320,25 @@ async function pushBrandGroup(
   }
 }
 
+/**
+ * `DEBUG_SKILL_ROOTS=1` traces every skill-root decision to stderr.
+ *
+ * Skill discovery is a chain of silent no-ops by design: a configured dir that
+ * does not resolve where you expect, or resolves somewhere that is not a
+ * directory, is dropped without a word. "My repo skills are not loaded"
+ * therefore carries no information about WHICH link failed — and the two
+ * candidate causes (never configured vs configured and rejected) look
+ * identical from outside. This prints the input, the resolved path, and the
+ * verdict at each link.
+ */
+export function traceSkillRoots(event: string, fields: Record<string, unknown>): void {
+  if (!process.env['DEBUG_SKILL_ROOTS']) return;
+  const rendered = Object.entries(fields)
+    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    .join(' ');
+  process.stderr.write(`[skill-roots] ${event} ${rendered}\n`);
+}
+
 async function pushConfiguredDirs(
   out: SkillRoot[],
   dirs: readonly string[],
@@ -315,14 +348,11 @@ async function pushConfiguredDirs(
   isDir: (p: string) => Promise<boolean>,
   realpath: (p: string) => Promise<string>,
 ): Promise<void> {
+  traceSkillRoots('configured.enter', { source, dirs, projectRoot, userHomeDir });
   for (const dir of dirs) {
-    await pushExistingRoot(
-      out,
-      resolveConfiguredDir(dir, projectRoot, userHomeDir),
-      source,
-      isDir,
-      realpath,
-    );
+    const resolved = resolveConfiguredDir(dir, projectRoot, userHomeDir);
+    const accepted = await pushExistingRoot(out, resolved, source, isDir, realpath);
+    traceSkillRoots('configured.entry', { source, dir, resolved, accepted });
   }
 }
 
@@ -333,9 +363,14 @@ async function pushExistingRoot(
   isDir: (p: string) => Promise<boolean>,
   realpath: (p: string) => Promise<string>,
 ): Promise<boolean> {
-  if (!(await isDir(dir))) return false;
+  if (!(await isDir(dir))) {
+    traceSkillRoots('reject.notADirectory', { dir, source });
+    return false;
+  }
   const resolved = await realpath(dir);
-  if (!out.some((root) => root.path === resolved)) out.push({ path: resolved, source });
+  const duplicate = out.some((root) => root.path === resolved);
+  traceSkillRoots(duplicate ? 'reject.duplicate' : 'accept', { dir, resolved, source });
+  if (!duplicate) out.push({ path: resolved, source });
   return true;
 }
 

@@ -60,10 +60,27 @@ export class ExtraFileSkillSource extends Disposable implements IExtraFileSkillS
 
   async load(): Promise<SkillContribution> {
     await this.config.ready;
-    const extraSkillDirs = this.config.get<ExtraSkillDirsConfig>(EXTRA_SKILL_DIRS_SECTION) ?? [];
-    return this.discovery.discover(
+    const raw = this.config.get<ExtraSkillDirsConfig>(EXTRA_SKILL_DIRS_SECTION);
+    const extraSkillDirs = raw ?? [];
+    // See DEBUG_SKILL_ROOTS in skillCatalog/skillRoots.ts. Traced here too
+    // because "configured but not loaded" and "never configured" look
+    // identical downstream: `?? []` erases the difference silently.
+    if (process.env['DEBUG_SKILL_ROOTS']) {
+      process.stderr.write(
+        `[skill-roots] extraFileSkillSource.load section=${EXTRA_SKILL_DIRS_SECTION} `
+        + `present=${raw !== undefined} value=${JSON.stringify(extraSkillDirs)} `
+        + `cwd=${this.workspace.cwd} osHomeDir=${this.bootstrap.osHomeDir}\n`,
+      );
+    }
+    const contribution = await this.discovery.discover(
       await configuredRoots(extraSkillDirs, this.workspace.cwd, this.bootstrap.osHomeDir, 'extra'),
     );
+    if (process.env['DEBUG_SKILL_ROOTS']) {
+      process.stderr.write(
+        `[skill-roots] extraFileSkillSource.discovered n=${contribution.skills?.length ?? 0}\n`,
+      );
+    }
+    return contribution;
   }
 }
 
